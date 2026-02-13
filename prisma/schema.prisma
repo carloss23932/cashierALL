@@ -1,0 +1,181 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Prisma schema
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Category {
+  id       Int       @id @default(autoincrement())
+  name     String
+  description String?
+  color    String?
+  products Product[]
+}
+
+model Product {
+  id         Int      @id @default(autoincrement())
+  name       String
+  price      Float
+  stock      Int
+  barcode    String?
+  unitsPerBox Int     @default(1)
+  boxPurchasePrice Float @default(0)
+  boxSalePrice Float @default(0)
+  categoryId Int?
+  category   Category? @relation(fields: [categoryId], references: [id])
+  // Relation to sale items for reporting/invoices
+  saleItems  SaleItem[]
+  returnItems ReturnItem[]
+}
+
+model Sale {
+  id        Int        @id @default(autoincrement())
+  createdAt DateTime   @default(now())
+  total     Float
+  discount  Float      @default(0)
+  paymentMethod String @default("cash")
+  commission    Float  @default(0)
+  clientName    String?
+  items     SaleItem[]
+  // Optional relation to the cashier/user who created the sale
+  cashier   User?     @relation(fields: [cashierId], references: [id], onDelete: SetNull)
+  cashierId Int?
+  returns   Return[]
+}
+
+model SaleItem {
+  id        Int     @id @default(autoincrement())
+  sale      Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  saleId    Int
+  product   Product @relation(fields: [productId], references: [id])
+  productId Int
+  quantity  Int
+  price     Float
+}
+
+model Return {
+  id        Int         @id @default(autoincrement())
+  sale      Sale        @relation(fields: [saleId], references: [id])
+  saleId    Int
+  createdAt DateTime    @default(now())
+  cashier   User?       @relation(fields: [cashierId], references: [id], onDelete: SetNull)
+  cashierId Int?
+  items     ReturnItem[]
+}
+
+model ReturnItem {
+  id        Int     @id @default(autoincrement())
+  return    Return  @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  returnId  Int
+  product   Product @relation(fields: [productId], references: [id])
+  productId Int
+  quantity  Int
+  price     Float
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  username     String   @unique
+  name         String?
+  passwordHash String
+  role         String?  @default("cashier")
+  createdAt    DateTime @default(now())
+  // Sales created by this user
+  sales        Sale[]
+  returns      Return[]
+  debtsCreated Debt[]         @relation("DebtCreatedBy")
+  debtPayments DebtPayment[]
+  activityLogs UserActivityLog[]
+}
+
+model Client {
+  id        Int      @id @default(autoincrement())
+  name      String
+  phone     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  debts     Debt[]
+}
+
+model Debt {
+  id          Int           @id @default(autoincrement())
+  amount      Float
+  note        String?
+  reason      String?
+  dueDate     DateTime?
+  paid        Boolean       @default(false)
+  paidAt      DateTime?
+  createdAt   DateTime      @default(now())
+  client      Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  clientId    Int
+  createdBy   User?         @relation("DebtCreatedBy", fields: [createdById], references: [id])
+  createdById Int?
+  payments    DebtPayment[]
+}
+
+model DebtPayment {
+  id        Int      @id @default(autoincrement())
+  amount    Float
+  note      String?
+  createdAt DateTime @default(now())
+  debt      Debt     @relation(fields: [debtId], references: [id], onDelete: Cascade)
+  debtId    Int
+  user      User?    @relation(fields: [userId], references: [id])
+  userId    Int?
+}
+
+model DailyNote {
+  id        Int      @id @default(autoincrement())
+  type      String
+  amount    Float
+  text      String
+  noteDate  DateTime
+  createdAt DateTime @default(now())
+}
+
+model ChickenLegDay {
+  id            Int            @id @default(autoincrement())
+  date          DateTime       @unique
+  startingStock Int            @default(0)
+  createdAt     DateTime       @default(now())
+  logs          ChickenLegLog[]
+}
+
+model ChickenLegLog {
+  id        Int            @id @default(autoincrement())
+  name      String
+  reason    String
+  quantity  Int
+  note      String?
+  logDate   DateTime
+  createdAt DateTime       @default(now())
+  dayId     Int
+  day       ChickenLegDay  @relation(fields: [dayId], references: [id], onDelete: Cascade)
+}
+
+model UserActivityLog {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  action    String // "login" or "logout"
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+  @@index([userId, createdAt])
+}
+
+// Simple key/value settings table for application-wide configuration
+model AppSetting {
+  id        Int      @id @default(autoincrement())
+  key       String   @unique
+  value     String?
+  updatedAt DateTime @updatedAt
+}

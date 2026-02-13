@@ -1,0 +1,36 @@
+appId: com.cro.p
+productName: "مركز الجمجمة"
+# icon: electron/icons/chicken.png
+directories:
+  output: release
+asar: false
+files:
+  - dist/**
+  - electron/**
+  - server/**
+  - node_modules/**
+  - package.json
+extraResources:
+  # Ship Prisma engines and schema so the packaged app can initialize Prisma in production.
+  - from: node_modules/.prisma
+    to: app/node_modules/.prisma
+  - prisma/schema.prisma
+  - prisma/dev.db
+  - electron/icons/chicken.png
+extraMetadata:
+  main: electron/main.cjs
+npmRebuild: true
+win:
+  target:
+    - nsis
+  signAndEditExecutable: false
+publish:
+  provider: github
+  owner: YOUR_GITHUB_USERNAME
+  repo: YOUR_REPO
+  releaseType: release
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  shortcutName: "مركز الجمجمة"
+  runAfterFinish: true

@@ -2,7 +2,7 @@
   "name": "cro-p",
   "productName": "مركز الجمجمة",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.0.1",
   "type": "module",
   "scripts": {
     "dev": "npx vite --port 8080 --strictPort",
@@ -61,6 +61,12 @@
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico",
       "installerHeaderIcon": "build/icon.ico"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "carloss23932",
+      "repo": "cashier-updata",
+      "releaseType": "release"
     }
   },
   "dependencies": {

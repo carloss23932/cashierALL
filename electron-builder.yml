@@ -26,8 +26,8 @@ win:
   signAndEditExecutable: false
 publish:
   provider: github
-  owner: YOUR_GITHUB_USERNAME
-  repo: YOUR_REPO
+  owner: carloss23932
+  repo: cashier-updata
   releaseType: release
 nsis:
   oneClick: false

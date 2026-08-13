@@ -29,6 +29,7 @@
   "build": {
     "appId": "com.pos.system",
     "productName": "CRO P",
+    "artifactName": "${productName} Setup ${version}-${arch}.${ext}",
     "asar": false,
     "directories": {
       "output": "dist_electron",

@@ -4,6 +4,7 @@
 // Prisma schema
 generator client {
   provider = "prisma-client-js"
+  engineType = "binary"
 }
 
 datasource db {

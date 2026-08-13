@@ -24,7 +24,6 @@ win:
   target:
     - nsis
   arch:
-    - x64
     - ia32
   signAndEditExecutable: false
 publish:

@@ -17,7 +17,7 @@
     "prebuild:desktop": "npx prisma db push --accept-data-loss && npx prisma db seed",
     "build:desktop": "npm run prebuild:desktop && npm run prisma:generate && npm run build && electron-builder",
     "publish:desktop": "npm run prebuild:desktop && npm run prisma:generate && npm run build && electron-builder --publish always",
-    "dist:win": "electron-builder --win --x64 --ia32",
+    "dist:win": "electron-builder --win --ia32",
     "postinstall": "electron-builder install-app-deps",
     "prisma:generate": "npx prisma generate",
     "check-db": "node -e \"console.log('DB exists:', require('fs').existsSync('prisma/dev.db'))\"",
@@ -54,7 +54,6 @@
         {
           "target": "nsis",
           "arch": [
-            "x64",
             "ia32"
           ]
         }
@@ -151,7 +150,7 @@
     "@vitejs/plugin-react-swc": "^3.5.0",
     "autoprefixer": "^10.4.20",
     "concurrently": "^8.2.2",
-    "electron": "^31.3.1",
+    "electron": "^22.3.27",
     "electron-builder": "^24.13.3",
     "electron-rebuild": "^3.2.9",
     "eslint": "^9.9.0",

@@ -1,6 +1,6 @@
 appId: com.cro.p
 productName: "CRO P"
-icon: release/.icon-ico/icon.ico
+icon: electron/icons/icon.ico
 directories:
   output: release
 asar: false

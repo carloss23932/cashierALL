@@ -58,7 +58,7 @@
           ]
         }
       ],
-      "icon": "release/.icon-ico/icon.ico",
+      "icon": "electron/icons/icon.ico",
       "signAndEditExecutable": false,
       "verifyUpdateCodeSignature": false
     },
@@ -67,9 +67,9 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "installerIcon": "release/.icon-ico/icon.ico",
-      "uninstallerIcon": "release/.icon-ico/icon.ico",
-      "installerHeaderIcon": "release/.icon-ico/icon.ico"
+      "installerIcon": "electron/icons/icon.ico",
+      "uninstallerIcon": "electron/icons/icon.ico",
+      "installerHeaderIcon": "electron/icons/icon.ico"
     },
     "publish": {
       "provider": "github",

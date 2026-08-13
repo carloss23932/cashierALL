@@ -602,10 +602,10 @@ const DebtsPage: React.FC = () => {
                     size="sm"
                     variant="destructive"
                     onClick={handleDeleteClient}
-                    disabled={deleteClient.isLoading}
+                    disabled={deleteClient.isPending}
                   >
                     <Trash2 className="w-4 h-4 ml-1" />
-                    {deleteClient.isLoading ? "جاري الحذف..." : "حذف العميل"}
+                    {deleteClient.isPending ? "جاري الحذف..." : "حذف العميل"}
                   </Button>
                 )}
                 <Button size="sm" variant="outline" onClick={() => {
@@ -760,8 +760,8 @@ const DebtsPage: React.FC = () => {
                 onChange={(e) => setNewPhone(e.target.value)}
               />
               {clientError && <div className="text-xs text-destructive">{clientError}</div>}
-              <Button className="w-full" onClick={handleCreateClient} disabled={createClient.isLoading}>
-                {createClient.isLoading ? "جاري الحفظ..." : "حفظ"}
+              <Button className="w-full" onClick={handleCreateClient} disabled={createClient.isPending}>
+                {createClient.isPending ? "جاري الحفظ..." : "حفظ"}
               </Button>
             </CardContent>
           </Card>
@@ -797,8 +797,8 @@ const DebtsPage: React.FC = () => {
                 onChange={(e) => setDebtNote(e.target.value)}
               />
               {debtError && <div className="text-xs text-destructive">{debtError}</div>}
-              <Button className="w-full" onClick={handleAddDebt} disabled={createDebt.isLoading}>
-                {createDebt.isLoading ? "جاري الإضافة..." : "إضافة"}
+              <Button className="w-full" onClick={handleAddDebt} disabled={createDebt.isPending}>
+                {createDebt.isPending ? "جاري الإضافة..." : "إضافة"}
               </Button>
             </CardContent>
           </Card>
@@ -828,8 +828,8 @@ const DebtsPage: React.FC = () => {
                 value={payNote}
                 onChange={(e) => setPayNote(e.target.value)}
               />
-              <Button className="w-full" onClick={handleAddPayment} disabled={!selectedClientId || addPayment.isLoading}>
-                {addPayment.isLoading ? "جاري الإضافة..." : "إضافة دفعة"}
+              <Button className="w-full" onClick={handleAddPayment} disabled={!selectedClientId || addPayment.isPending}>
+                {addPayment.isPending ? "جاري الإضافة..." : "إضافة دفعة"}
               </Button>
             </CardContent>
           </Card>
@@ -878,9 +878,9 @@ const DebtsPage: React.FC = () => {
                     note: editDebtNote || null,
                   });
                 }}
-                disabled={updateDebt.isLoading}
+                disabled={updateDebt.isPending}
               >
-                {updateDebt.isLoading ? "جاري التعديل..." : "تعديل"}
+                {updateDebt.isPending ? "جاري التعديل..." : "تعديل"}
               </Button>
             </CardContent>
           </Card>
@@ -923,9 +923,9 @@ const DebtsPage: React.FC = () => {
                     note: editPaymentNote || null,
                   });
                 }}
-                disabled={updatePayment.isLoading}
+                disabled={updatePayment.isPending}
               >
-                {updatePayment.isLoading ? "جاري التعديل..." : "تعديل الدفعة"}
+                {updatePayment.isPending ? "جاري التعديل..." : "تعديل الدفعة"}
               </Button>
             </CardContent>
           </Card>
@@ -961,9 +961,9 @@ const DebtsPage: React.FC = () => {
                     clientName: editClientName.trim(),
                   });
                 }}
-                disabled={updateClient.isLoading}
+                disabled={updateClient.isPending}
               >
-                {updateClient.isLoading ? "جاري التعديل..." : "تعديل الاسم"}
+                {updateClient.isPending ? "جاري التعديل..." : "تعديل الاسم"}
               </Button>
             </CardContent>
           </Card>

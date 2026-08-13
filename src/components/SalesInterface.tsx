@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from "react";
+import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,9 +11,12 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/componen
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Trash2, ShoppingCart, ChevronsUpDown, Check, Plus, X, Settings, AlertTriangle, RotateCcw, Search, Barcode, CreditCard, Banknote, User, Package, Info, Snowflake, ArrowRightLeft } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
 import { Checkbox } from "./ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import { POS_PENDING_EDIT_SALE_KEY } from "@/lib/pending-sale-edit";
+import type { PendingSaleEditPayload } from "@/lib/pending-sale-edit";
 
 const SalesInterface = ({ currentUser, soundEnabled = true, allowPriceEdit = false }: { currentUser: any, soundEnabled?: boolean, allowPriceEdit?: boolean }) => {
   const qc = useQueryClient();
@@ -29,12 +32,14 @@ const SalesInterface = ({ currentUser, soundEnabled = true, allowPriceEdit = fal
     }).format(value);
   };
 
-  // طباعة بيانات المستخدم الحالي في الكونسول للتأكد من وصولها
+  // طباعة بيانات المستخدم فقط في وضع التطوير لمنع تلوث الكونسول في الإنتاج
   useEffect(() => {
-    console.log("Current User Data:", currentUser);
+    if (import.meta.env.DEV) {
+      console.log("Current User Data:", currentUser);
+    }
   }, [currentUser]);
 
-  // إدارة التبويبات (الفواتير المفتوحة)
+  // إدارة التبويبات (الفواتير المفتوحة）
   const [tabs, setTabs] = useState(() => {
     try {
       const saved = localStorage.getItem("pos_tabs");
@@ -69,7 +74,10 @@ const SalesInterface = ({ currentUser, soundEnabled = true, allowPriceEdit = fal
 
   // حفظ التبويبات عند أي تغيير لضمان عدم ضياع البيانات عند التنقل
   useEffect(() => {
-    localStorage.setItem("pos_tabs", JSON.stringify(tabs));
+    const persistTimer = window.setTimeout(() => {
+      localStorage.setItem("pos_tabs", JSON.stringify(tabs));
+    }, 120);
+    return () => window.clearTimeout(persistTimer);
   }, [tabs]);
 
   useEffect(() => {
@@ -84,6 +92,131 @@ const SalesInterface = ({ currentUser, soundEnabled = true, allowPriceEdit = fal
   const selectedClientId = activeTab.selectedClientId;
   const clientName = activeTab.clientName;
   const amountReceived = activeTab.amountReceived || 0;
+
+  // نظام الأوفلاين - Offline Mode System
+  const [isOnline, setIsOnline] = useState(true);
+  const [syncStatus, setSyncStatus] = useState<"idle" | "syncing" | "synced" | "error">("idle");
+
+  // مراقبة حالة الاتصال بالإنترنت
+  useEffect(() => {
+    let unsubscribe: (() => void) | undefined;
+
+    const loadNetworkStatus = async () => {
+      try {
+        const status = await window.api.getNetworkStatus();
+        const nextOnline = status?.isOnline !== false;
+        setIsOnline(nextOnline);
+        if (nextOnline) {
+          setSyncStatus("synced");
+          setTimeout(() => setSyncStatus("idle"), 1500);
+        } else {
+          setSyncStatus("idle");
+        }
+      } catch (error) {
+        console.error("[CONNECTIVITY] Failed to load network status:", error);
+      }
+    };
+
+    void loadNetworkStatus();
+
+    unsubscribe = window.api.onNetworkStatusChange((status: any) => {
+      const nextOnline = status?.isOnline !== false;
+      console.log("[CONNECTIVITY] network-status-changed", status);
+      setIsOnline(nextOnline);
+      if (nextOnline) {
+        setSyncStatus("synced");
+          setTimeout(() => setSyncStatus("idle"), 1500);
+      } else {
+        setSyncStatus("idle");
+      }
+    });
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, []);
+
+  // حفظ الفواتير المعلقة محليًا
+  useEffect(() => {
+    const rawPendingSale = localStorage.getItem(POS_PENDING_EDIT_SALE_KEY);
+    if (!rawPendingSale) return;
+
+    localStorage.removeItem(POS_PENDING_EDIT_SALE_KEY);
+
+    let pending: PendingSaleEditPayload | null = null;
+    try {
+      pending = JSON.parse(rawPendingSale);
+    } catch {
+      pending = null;
+    }
+
+    if (!pending || !Array.isArray(pending.items) || !pending.saleId) {
+      return;
+    }
+
+    const mappedCart = pending.items
+      .filter((item) => Number(item.productId) > 0 && Number(item.quantity) > 0)
+      .map((item) => ({
+        productId: Number(item.productId),
+        name: item.name || `منتج ${item.productId}`,
+        price: Number(item.price || 0),
+        quantity: Number(item.quantity || 0),
+        barcode: item.barcode || undefined,
+      }));
+
+    if (mappedCart.length === 0) {
+      toast({
+        title: "تعذر فتح الفاتورة",
+        description: "لا توجد أصناف صالحة للتعديل.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const tabPayload = {
+      cart: mappedCart,
+      paymentMethod: pending.paymentMethod || "cash",
+      discount: Number(pending.discount || 0),
+      selectedClientId: pending.clientId ? String(pending.clientId) : "",
+      clientName: pending.clientName || "",
+      editingSaleId: Number(pending.saleId),
+      amountReceived: Number(pending.amountReceived || 0),
+    };
+
+    const activeTabHasData =
+      !!activeTab?.editingSaleId ||
+      (activeTab?.cart?.length || 0) > 0 ||
+      Number(activeTab?.discount || 0) > 0 ||
+      !!activeTab?.selectedClientId ||
+      !!activeTab?.clientName ||
+      Number(activeTab?.amountReceived || 0) > 0;
+
+    let nextActiveTabId = activeTabId;
+
+    setTabs((prevTabs) => {
+      if (!activeTabHasData && prevTabs.some((tab) => tab.id === activeTabId)) {
+        nextActiveTabId = activeTabId;
+        return prevTabs.map((tab) => (tab.id === activeTabId ? { ...tab, ...tabPayload } : tab));
+      }
+
+      const newTabId = Math.max(...prevTabs.map((tab) => tab.id), 0) + 1;
+      nextActiveTabId = newTabId;
+      return [...prevTabs, { id: newTabId, ...tabPayload }];
+    });
+
+    setActiveTabId(nextActiveTabId);
+
+    toast({
+      title: "تم نقل الفاتورة",
+      description: `تم فتح الفاتورة #${pending.saleId} في نقطة البيع للتعديل.`,
+    });
+
+    setTimeout(() => {
+      if (barcodeInputRef.current) {
+        barcodeInputRef.current.focus();
+      }
+    }, 0);
+  }, []);
 
   // سكرول تلقائي لأسفل القائمة عند إضافة منتج جديد
   useEffect(() => {
@@ -108,6 +241,14 @@ const SalesInterface = ({ currentUser, soundEnabled = true, allowPriceEdit = fal
   const [freezeSourceId, setFreezeSourceId] = useState<string>("");
   const [freezeTargetId, setFreezeTargetId] = useState<string>("");
   const [freezeQty, setFreezeQty] = useState("");
+  const [freezeSourceSearch, setFreezeSourceSearch] = useState("");
+  const [freezeSourceSearchOpen, setFreezeSourceSearchOpen] = useState(false);
+  const [freezeTargetSearch, setFreezeTargetSearch] = useState("");
+  const [freezeTargetSearchOpen, setFreezeTargetSearchOpen] = useState(false);
+  const [showRetrieveDialog, setShowRetrieveDialog] = useState(false);
+  const [retrieveMode, setRetrieveMode] = useState<"last" | "number">("last");
+  const [retrieveInvoiceInput, setRetrieveInvoiceInput] = useState("");
+  const [isRetrievingSale, setIsRetrievingSale] = useState(false);
 
   // حالة التعامل مع الباركود المكرر
   const [duplicateProducts, setDuplicateProducts] = useState<any[]>([]);
@@ -130,7 +271,7 @@ const SalesInterface = ({ currentUser, soundEnabled = true, allowPriceEdit = fal
       const name = await window.api.getAppSetting('storeName');
       const address = await window.api.getAppSetting('storeAddress');
       const phone = await window.api.getAppSetting('storePhone');
-      const settings = { name: name || "مركز الجمجمة", address: address || "", phone: phone || "" };
+      const settings = { name: name || "CRO P", address: address || "", phone: phone || "" };
       setStoreSettings(settings);
       return settings;
     }
@@ -140,6 +281,37 @@ const SalesInterface = ({ currentUser, soundEnabled = true, allowPriceEdit = fal
     () => products.filter((p) => !p.barcode).sort((a, b) => a.name.localeCompare(b.name)),
     [products]
   );
+
+  const productsByBarcode = useMemo(() => {
+    const map = new Map<string, any[]>();
+    for (const product of products) {
+      const normalizedBarcode = String(product?.barcode || "").trim();
+      if (!normalizedBarcode) continue;
+      const bucket = map.get(normalizedBarcode);
+      if (bucket) {
+        bucket.push(product);
+      } else {
+        map.set(normalizedBarcode, [product]);
+      }
+    }
+    return map;
+  }, [products]);
+
+  const normalizedProductSearchQuery = useMemo(
+    () => String(productSearchQuery || "").trim().toLowerCase(),
+    [productSearchQuery]
+  );
+
+  const filteredProductSearchResults = useMemo(() => {
+    const query = normalizedProductSearchQuery;
+    if (!query) return []; // لا تعرض منتجات إذا لم يكن هناك بحث
+    const results = products.filter((product) => {
+      const name = String(product?.name || "").toLowerCase();
+      const code = String(product?.barcode || "").toLowerCase();
+      return name.includes(query) || code.includes(query);
+    });
+    return results; // عرض جميع النتائج بدون حد
+  }, [products, normalizedProductSearchQuery]);
 
   // دالة لتشغيل صوت تنبيه عند الخطأ (منتج غير موجود)
   const playErrorSound = () => {
@@ -287,10 +459,32 @@ const SalesInterface = ({ currentUser, soundEnabled = true, allowPriceEdit = fal
     setTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, ...updates } : t));
   };
 
-  const createSale = useMutation({
-    mutationFn: (payload) => window.api.createSale(payload),
-    onSuccess: async (newSale) => {
-      toast({ title: "نجاح", description: "تم إنشاء الفاتورة بنجاح." });
+  // تعريف mutationFn مع useCallback لضمان إعادة البناء الصحيحة
+  const handleCreateSaleMutation = useCallback(async (payload: any) => {
+    console.log("[MUTATION_FN] starting sale mutation");
+    console.log("[MUTATION_FN] current isOnline:", isOnline);
+    console.log("[MUTATION_FN] local save uses Electron IPC and should not depend on browser connectivity");
+
+    try {
+      const result = await window.api.createSale(payload);
+      console.log("[API_CALL] local sale created successfully");
+      return result;
+    } catch (err) {
+      console.error("[API_CALL] local sale creation failed:", err);
+      throw err;
+    }
+  }, [isOnline]);
+
+  const createSale = useMutation<any, any, any>({
+    mutationFn: handleCreateSaleMutation,
+    networkMode: "always",
+    retry: 0,
+    retryDelay: 0,
+    onSuccess: (newSale) => {
+      console.log("[SUCCESS] 🎉 **تم استدعاء onSuccess**");
+      console.log("[SUCCESS] البيانات المُرجعة:", newSale);
+      console.log("[SALE] ✅ SUCCESS - تم البيع بنجاح:", newSale);
+      toast({ title: "تم البيع", description: "تم إنشاء الفاتورة وحفظها بنجاح." });
       qc.invalidateQueries({ queryKey: ["products"] });
       qc.invalidateQueries({ queryKey: ["sales"] });
       
@@ -315,7 +509,7 @@ const SalesInterface = ({ currentUser, soundEnabled = true, allowPriceEdit = fal
       if (autoPrint && newSale) {
         try {
           // 1. تجميع بيانات الإيصال في كائن صريح ومحدد
-          const now = new Date(newSale.createdAt);
+          const now = new Date(newSale.createdAt || newSale.savedAt || new Date());
           const subTotalVal = newSale.items.reduce((sum, item) => sum + item.quantity * item.price, 0);
 
           const finalClientName = activeTab.clientName || (selectedClientId ? clients.find(c => String(c.id) === selectedClientId)?.name : null);
@@ -360,8 +554,17 @@ const SalesInterface = ({ currentUser, soundEnabled = true, allowPriceEdit = fal
             qrImage: "qr.png",
           };
           // 2. إرسال كائن الإيصال مباشرة إلى Electron
-          await window.api.printThermalReceipt(receiptPayload);
-          toast({ title: "تمت الطباعة", description: "تم إرسال إيصال البيع إلى الطابعة." });
+          void window.api.printThermalReceipt(receiptPayload)
+            .then(() => {
+              toast({ title: "🖨️ تمت الطباعة", description: "تم إرسال الإيصال إلى الطابعة بنجاح." });
+            })
+            .catch((printErr: any) => {
+              toast({
+                title: "خطأ في الطباعة التلقائية",
+                description: printErr?.message || "فشل الاتصال بالطابعة.",
+                variant: "destructive",
+              });
+            });
         } catch (printErr: any) {
           toast({
             title: "خطأ في الطباعة التلقائية",
@@ -372,8 +575,15 @@ const SalesInterface = ({ currentUser, soundEnabled = true, allowPriceEdit = fal
       }
     },
     onError: (err: any) => {
+      console.log("[ERROR] 🔴 **تم استدعاء onError**");
+      console.log("[SALE] ERROR - حدث خطأ في عملية البيع:", err);
+      console.error("[SALE] معلومات الخطأ الكاملة:", {
+        message: err?.message,
+        code: err?.code,
+        stack: err?.stack
+      });
       toast({
-        title: "خطأ",
+        title: "❌ خطأ في البيع",
         description: err.message || "فشل في إنشاء الفاتورة.",
         variant: "destructive",
       });
@@ -381,10 +591,15 @@ const SalesInterface = ({ currentUser, soundEnabled = true, allowPriceEdit = fal
   });
 
   // دالة تعديل الفاتورة
-  const updateSaleMutation = useMutation({
-    mutationFn: (payload) => window.api.updateSale(payload),
-    onSuccess: async (updatedSale) => {
-      toast({ title: "تم التعديل", description: "تم تعديل الفاتورة بنجاح." });
+  const updateSaleMutation = useMutation<any, any, any>({
+    mutationFn: async (payload: any) => {
+      return window.api.updateSale(payload);
+    },
+    networkMode: "always",
+    retry: 3,
+    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
+    onSuccess: (updatedSale) => {
+      toast({ title: "✏️ تم التعديل", description: "تم حفظ تعديلات الفاتورة بنجاح." });
       qc.invalidateQueries({ queryKey: ["products"] });
       qc.invalidateQueries({ queryKey: ["sales"] });
       
@@ -440,7 +655,7 @@ const SalesInterface = ({ currentUser, soundEnabled = true, allowPriceEdit = fal
               subtotal: subTotalVal,
               discount: updatedSale.discount,
               total: totalValue,
-              received: receivedAmount,
+              received: receivedAmount, 
               remaining: remainingAmount,
             },
             footer: isRamadan ? "🌙 رمضان مبارك 🌙 - تقبل الله طاعاتكم - شكراً لزيارتكم 🌹 (تعديل)" : "شكراً لزيارتكم 🌹 (تعديل)",
@@ -448,8 +663,17 @@ const SalesInterface = ({ currentUser, soundEnabled = true, allowPriceEdit = fal
             qrImage: "qr.png",
           };
           
-          await window.api.printThermalReceipt(receiptPayload);
-          toast({ title: "تمت الطباعة", description: "تم إرسال إيصال التعديل إلى الطابعة." });
+          void window.api.printThermalReceipt(receiptPayload)
+            .then(() => {
+              toast({ title: "🖨️ تمت الطباعة", description: "تم طباعة الإيصال المعدل بنجاح." });
+            })
+            .catch((printErr: any) => {
+              toast({
+                title: "خطأ في الطباعة التلقائية",
+                description: printErr?.message || "فشل الاتصال بالطابعة.",
+                variant: "destructive",
+              });
+            });
         } catch (printErr: any) {
           toast({
             title: "خطأ في الطباعة التلقائية",
@@ -460,34 +684,66 @@ const SalesInterface = ({ currentUser, soundEnabled = true, allowPriceEdit = fal
       }
     },
     onError: (err: any) => {
-      toast({ title: "خطأ", description: err.message || "فشل تعديل الفاتورة.", variant: "destructive" });
+      const errorMsg = err?.message || "فشل في حفظ التعديلات";
+      toast({ title: "❌ خطأ", description: errorMsg, variant: "destructive" });
     },
   });
 
   // دالة تحويل المنتج للتجميد
-  const freezeMutation = useMutation({
+  const filteredFreezeSourceProducts = useMemo(() => {
+    const query = freezeSourceSearch.trim().toLowerCase();
+    if (!query) return products.filter(p => p.categoryName === "الريان"); // عرض منتجات الريان فقط
+    
+    return products.filter(p => {
+      const isRayan = p.categoryName === "الريان";
+      if (!isRayan) return false;
+      
+      const productName = String(p?.name || "").toLowerCase().trim();
+      const productBarcode = String(p?.barcode || "").toLowerCase().trim();
+      return productName.includes(query) || productBarcode.includes(query);
+    });
+  }, [products, freezeSourceSearch]);
+
+  const filteredFreezeTargetProducts = useMemo(() => {
+    const query = freezeTargetSearch.trim().toLowerCase();
+    const targetCategories = ["البوادي", "بوادي"]; // الفئات المطلوبة للهدف
+    
+    if (!query) return products.filter(p => targetCategories.includes(p.categoryName || "")); // عرض منتجات البوادي فقط
+    
+    return products.filter(p => {
+      const isTarget = targetCategories.includes(p.categoryName || "");
+      if (!isTarget) return false;
+      
+      const productName = String(p?.name || "").toLowerCase().trim();
+      const productBarcode = String(p?.barcode || "").toLowerCase().trim();
+      return productName.includes(query) || productBarcode.includes(query);
+    });
+  }, [products, freezeTargetSearch]);
+
+  const freezeMutation = useMutation<any, any, any>({
     mutationFn: (data: any) => window.api.freezeProduct(data),
+    networkMode: "always",
     onSuccess: () => {
-      toast({ title: "تم التحويل", description: "تم تحويل الكمية إلى المجمد بنجاح." });
+      toast({ title: "❄️ تم التحويل", description: "تم تحويل الكمية إلى المنتج المجمد بنجاح." });
       setFreezeOpen(false);
       setFreezeSourceId("");
       setFreezeTargetId("");
       setFreezeQty("");
       qc.invalidateQueries({ queryKey: ["products"] });
     },
-    onError: (err: any) => toast({ title: "خطأ", description: err.message || "فشل التحويل", variant: "destructive" })
+    onError: (err: any) => toast({ title: "❌ خطأ التحويل", description: err.message || "فشل تحويل الكمية", variant: "destructive" })
   });
 
   const handleFreezeSubmit = () => {
     if (!freezeSourceId || !freezeTargetId || !freezeQty) return;
-    if (freezeSourceId === freezeTargetId) { toast({ title: "تنبيه", description: "لا يمكن التحويل لنفس المنتج", variant: "destructive" }); return; }
+    if (freezeSourceId === freezeTargetId) { toast({ title: "⚠️ تنبيه", description: "لا يمكن نقل المنتج إلى نفسه", variant: "destructive" }); return; }
     freezeMutation.mutate({ fromId: freezeSourceId, toId: freezeTargetId, quantity: Number(freezeQty) });
   };
 
   const handleBarcodeScan = (e) => {
     if (e.key === "Enter" && barcode.trim()) {
       const scannedCode = barcode.trim();
-      const matchedProducts = products.filter((p) => String(p.barcode || "").trim() === scannedCode);
+      const matchedProducts = productsByBarcode.get(scannedCode) || [];
 
       if (matchedProducts.length === 1) {
         addToCart(matchedProducts[0]);
@@ -517,7 +773,7 @@ const SalesInterface = ({ currentUser, soundEnabled = true, allowPriceEdit = fal
     const product = products.find(p => p.id === item.productId);
     
     if (!product || !product.alternativeProductId) {
-        toast({ title: "تنبيه", description: "لم يتم تحديد منتج بديل لهذا الصنف في إدارة المنتجات.", variant: "destructive" });
+        toast({ title: "⚠️ منتج بديل", description: "لم يتم تحديد منتج بديل لهذا الصنف.", variant: "destructive" });
         return;
     }
 
@@ -548,7 +804,7 @@ const SalesInterface = ({ currentUser, soundEnabled = true, allowPriceEdit = fal
       });
       playSuccessSound();
     } else {
-      toast({ title: "خطأ", description: "المنتج البديل المحدد غير موجود في قاعدة البيانات.", variant: "destructive" });
+      toast({ title: "❌ خطأ", description: "المنتج البديل غير موجود في النظام.", variant: "destructive" });
     }
   };
 
@@ -634,29 +890,36 @@ const SalesInterface = ({ currentUser, soundEnabled = true, allowPriceEdit = fal
   const itemsCount = useMemo(() => cart.reduce((sum, item) => sum + item.quantity, 0), [cart]);
   const subTotal = useMemo(() => cart.reduce((sum, item) => sum + item.price * item.quantity, 0), [cart]);
   const commission = 0; // العمولة ملغاة بشكل دائم
-  const total = useMemo(() => subTotal - discount, [subTotal, discount]);
+  const total = useMemo(() => Math.max(0, subTotal - Math.max(0, Number(discount) || 0)), [subTotal, discount]);
   const change = amountReceived - total;
 
   const handleCreateSale = () => {
     try {
+      console.log("[HANDLE_SALE] بدء معالج البيع", { isOnline });
+      
       if (cart.length === 0) {
-        toast({ title: "تنبيه", description: "السلة فارغة!", variant: "destructive" });
+        console.log("[HANDLE_SALE] السلة فارغة");
+        toast({ title: "🛒 السلة فارغة", description: "يجب إضافة منتجات إلى السلة قبل البيع.", variant: "destructive" });
         return;
       }
+      console.log("[HANDLE_SALE] عدد المنتجات في السلة:", cart.length);
 
       if (paymentMethod === "debt" && !selectedClientId && !clientName.trim()) {
-        toast({ title: "تنبيه", description: "يرجى اختيار أو إدخال اسم العميل للفاتورة الآجلة.", variant: "destructive" });
+        console.log("[HANDLE_SALE] الدفع آجل بدون عميل");
+        toast({ title: "⚠️ تنبيه مهم", description: "يجب اختيار أو إدخال اسم العميل للفاتورة الآجلة (الدين).", variant: "destructive" });
         return;
       }
 
       const computedClientName = clientName || (selectedClientId ? clients.find(c => String(c.id) === String(selectedClientId))?.name : "") || "";
       const hasPartialPayment = amountReceived > 0 && amountReceived < total;
       if (hasPartialPayment && !computedClientName) {
-        toast({ title: "تنبيه", description: "يرجى إدخال اسم العميل عند دفع جزء من الفاتورة.", variant: "destructive" });
+        console.log("[HANDLE_SALE] دفع جزئي بدون عميل");
+        toast({ title: "⚠️ بيانات ناقصة", description: "يرجى إدخال اسم العميل عند الدفع بشكل جزئي.", variant: "destructive" });
         return;
       }
 
       if (activeTab.editingSaleId) {
+        console.log("[HANDLE_SALE] وضع التعديل - رقم الفاتورة:", activeTab.editingSaleId);
         // وضع التعديل
         updateSaleMutation.mutate({
           saleId: activeTab.editingSaleId,
@@ -664,9 +927,19 @@ const SalesInterface = ({ currentUser, soundEnabled = true, allowPriceEdit = fal
           discount: discount,
           paymentMethod: paymentMethod,
           clientId: selectedClientId ? Number(selectedClientId) : null,
-          clientName: computedClientName
+          clientName: computedClientName,
+          amountReceived: amountReceived
         });
       } else {
+        console.log("[HANDLE_SALE] وضع الإنشاء الجديد - الإجمالي:", total);
+        console.log("[HANDLE_SALE] 📢 **استدعاء createSale.mutate()**");
+        console.log("[HANDLE_SALE] البايلود:", {
+          items: cart.length,
+          paymentMethod,
+          discount,
+          clientId: selectedClientId,
+          amountReceived
+        });
         // وضع الإنشاء الجديد
         createSale.mutate({
           items: cart,
@@ -677,42 +950,82 @@ const SalesInterface = ({ currentUser, soundEnabled = true, allowPriceEdit = fal
           clientName: computedClientName,
           amountReceived: amountReceived
         });
+        console.log("[HANDLE_SALE] ✅ تم استدعاء mutate");
       }
     } catch (error) {
-      console.error("Error in handleCreateSale:", error);
-      toast({ title: "خطأ غير متوقع", description: "حدثت مشكلة أثناء محاولة الحفظ. يرجى المحاولة مرة أخرى.", variant: "destructive" });
+      console.error("[HANDLE_SALE] Error in handleCreateSale:", error);
+      toast({ title: "😕 خطأ غير متوقع", description: "حدثت مشكلة أثناء الحفظ. يرجى المحاولة لاحقاً.", variant: "destructive" });
     }
   };
 
+
+  const applyRetrievedSaleToTab = (sale: any) => {
+    const newCart = sale.items.map((item) => ({
+      productId: item.productId,
+      name: item.product?.name || "منتج غير معروف",
+      price: item.price,
+      quantity: item.quantity,
+    }));
+
+    updateActiveTab({
+      cart: newCart,
+      paymentMethod: sale.paymentMethod,
+      discount: sale.discount,
+      selectedClientId: sale.clientId ? String(sale.clientId) : "",
+      clientName: sale.clientName || "",
+      editingSaleId: sale.id,
+      amountReceived: 0
+    });
+
+    setShowRetrieveDialog(false);
+    setRetrieveMode("last");
+    setRetrieveInvoiceInput("");
+    toast({ title: "📋 تم الاسترجاع", description: `تم استرجاع الفاتورة #${sale.id} للتعديل.` });
+  };
+
   const handleRetrieveLastSale = async () => {
+    setIsRetrievingSale(true);
     try {
       const lastSale = await window.api.getLastSale();
       if (!lastSale) {
-        toast({ title: "تنبيه", description: "لا توجد فواتير سابقة.", variant: "destructive" });
+        toast({ title: "ℹ️ لا توجد فواتير", description: "لا توجد فواتير سابقة للاسترجاع.", variant: "destructive" });
         return;
       }
 
-      const newCart = lastSale.items.map((item) => ({
-        productId: item.productId,
-        name: item.product?.name || "منتج غير معروف",
-        price: item.price,
-        quantity: item.quantity,
-      }));
-
-      updateActiveTab({
-        cart: newCart,
-        paymentMethod: lastSale.paymentMethod,
-        discount: lastSale.discount,
-        selectedClientId: lastSale.clientId ? String(lastSale.clientId) : "",
-        clientName: lastSale.clientName || "",
-        editingSaleId: lastSale.id,
-        amountReceived: 0
-      });
-
-      toast({ title: "تم الاسترجاع", description: `تم استرجاع الفاتورة #${lastSale.id} للتعديل.` });
+      applyRetrievedSaleToTab(lastSale);
     } catch (e) {
       console.error(e);
-      toast({ title: "خطأ", description: "فشل استرجاع الفاتورة.", variant: "destructive" });
+      toast({ title: "❌ خطأ", description: "فشل في استرجاع الفاتورة.", variant: "destructive" });
+    } finally {
+      setIsRetrievingSale(false);
+    }
+  };
+
+  const handleRetrieveSaleByNumber = async () => {
+    const rawValue = retrieveInvoiceInput.trim();
+    if (!rawValue) {
+      toast({ title: "⚠️ بيانات ناقصة", description: "يرجى إدخال رقم الفاتورة للاسترجاع.", variant: "destructive" });
+      return;
+    }
+
+    if (typeof window.api.getSaleById !== "function") {
+      toast({ title: "❌ غير مدعوم", description: "هذا الإصدار لا يدعم استرجاع الفواتير برقم.", variant: "destructive" });
+      return;
+    }
+
+    setIsRetrievingSale(true);
+    try {
+      const sale = await window.api.getSaleById(rawValue);
+      if (!sale) {
+        toast({ title: "🔍 لم تُعثر", description: "لم يتم العثور على فاتورة برقم: " + rawValue, variant: "destructive" });
+        return;
+      }
+      applyRetrievedSaleToTab(sale);
+    } catch (e) {
+      console.error(e);
+      toast({ title: "❌ خطأ", description: "فشل في استرجاع الفاتورة برقم.", variant: "destructive" });
+    } finally {
+      setIsRetrievingSale(false);
     }
   };
 
@@ -749,29 +1062,32 @@ const SalesInterface = ({ currentUser, soundEnabled = true, allowPriceEdit = fal
     <div className="flex flex-col lg:flex-row gap-4 p-4 bg-slate-100/50 h-[calc(100vh-4rem)] overflow-hidden font-sans" dir="rtl">
       {/* قسم المنتجات السريعة (بدون باركود) */}
       <aside className="lg:w-[280px] xl:w-[320px] shrink-0 h-full flex flex-col">
-        <Card className="h-full flex flex-col shadow-lg border-0 rounded-2xl overflow-hidden bg-white ring-1 ring-slate-900/5">
-          <CardHeader className="p-4 bg-gradient-to-b from-slate-50 to-white border-b border-slate-100">
-            <CardTitle className="text-base font-bold flex items-center gap-2 text-slate-700">
-              <Package className="w-5 h-5 text-blue-600" />
-              منتجات سريعة
+        <Card className="h-full flex flex-col shadow-xl border-0 rounded-3xl overflow-hidden bg-gradient-to-br from-white to-slate-50 ring-1 ring-slate-900/5">
+          <CardHeader className="p-5 bg-gradient-to-r from-slate-50 to-white border-b border-slate-100">
+            <CardTitle className="text-base font-bold flex items-center gap-3 text-slate-800">
+              <div className="p-2.5 rounded-xl bg-gradient-to-br from-blue-100 to-blue-50 text-blue-600">
+                <Package className="w-5 h-5" />
+              </div>
+              <span>⚡ منتجات سريعة</span>
             </CardTitle>
           </CardHeader>
-          <CardContent className="flex-1 overflow-y-auto p-3 bg-slate-50/50">
+          <CardContent className="flex-1 overflow-y-auto p-4 bg-gradient-to-b from-white to-slate-50/50">
             {productsWithoutBarcode.length > 0 ? (
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
                 {productsWithoutBarcode.map((product) => (
                   <Button
                     key={product.id}
                     variant="secondary"
-                    className="h-auto py-3 px-2 text-xs whitespace-normal text-center leading-tight bg-white hover:bg-blue-50 border border-slate-200 hover:border-blue-200 shadow-sm hover:shadow-md transition-all duration-200 rounded-xl flex flex-col justify-center gap-1"
+                    className="h-auto py-4 px-3 text-xs whitespace-normal text-center leading-tight bg-white hover:bg-gradient-to-br hover:from-blue-50 hover:to-cyan-50 border-2 border-slate-200 hover:border-blue-300 shadow-sm hover:shadow-md transition-all duration-200 rounded-xl flex flex-col justify-center gap-1.5 font-medium text-slate-700"
                     onClick={() => addToCart(product)}
                   >
-                    <span className="font-semibold text-slate-700 line-clamp-2">{product.name}</span>
+                    <span className="line-clamp-2 font-semibold">{product.name}</span>
+                    <span className="text-[10px] text-slate-500">{formatCurrency(product.price)} د.ع</span>
                   </Button>
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-gray-500 text-center py-8">لا توجد منتجات بدون باركود.</p>
+              <p className="text-sm text-gray-500 text-center py-8">❌ لا توجد منتجات بدون باركود.</p>
             )}
           </CardContent>
         </Card>
@@ -786,22 +1102,60 @@ const SalesInterface = ({ currentUser, soundEnabled = true, allowPriceEdit = fal
             <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded text-emerald-50">خصومات الشهر الفضيل</span>
           </div>
         )}
+
+        {/* بانر حالة الاتصال والتزامن */}
+        {(!isOnline || syncStatus === "synced" || syncStatus === "syncing" || syncStatus === "error") && (
+          <div className={`px-4 py-2 rounded-xl shadow-md flex items-center justify-between shrink-0 animate-in fade-in slide-in-from-top-2 duration-300 ${
+            isOnline 
+              ? syncStatus === "syncing" 
+                ? "bg-gradient-to-r from-blue-500 to-blue-600 text-white"
+                : syncStatus === "synced"
+                ? "bg-gradient-to-r from-green-500 to-emerald-600 text-white"
+                : syncStatus === "error"
+                ? "bg-gradient-to-r from-red-500 to-rose-600 text-white"
+                : "bg-gradient-to-r from-slate-500 to-slate-600 text-white"
+              : "bg-gradient-to-r from-orange-500 to-amber-600 text-white"
+          }`}>
+            <span className="font-bold flex items-center gap-2 text-sm">
+              {!isOnline ? (
+                <>
+                  <span className="w-2 h-2 bg-white rounded-full animate-pulse"></span>
+                  🔌 وضع أوفلاين - البيانات تُحفظ محليًا
+                </>
+              ) : syncStatus === "syncing" ? (
+                <>
+                  <span className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                  جاري التزامن ...
+                </>
+              ) : syncStatus === "synced" ? (
+                <>
+                  ✅ تم التزامن بنجاح
+                </>
+              ) : (
+                <>
+                  ⚠️ خطأ في التزامن
+                </>
+              )}
+            </span>
+          </div>
+        )}
+
         {/* شريط التبويبات */}
-        <div className="flex items-center gap-2 px-1 overflow-x-auto pb-1 no-scrollbar shrink-0">
+        <div className="flex items-center gap-2 px-2 overflow-x-auto pb-1 no-scrollbar shrink-0 bg-gradient-to-r from-slate-50 to-slate-100 border-b border-slate-200 py-2 rounded-b-xl">
           {tabs.map(tab => (
             <div
               key={tab.id}
-              className={`flex items-center gap-2 px-4 py-2 text-sm rounded-full cursor-pointer transition-all select-none shadow-sm border ${
+              className={`flex items-center gap-2 px-5 py-2.5 text-sm rounded-xl cursor-pointer transition-all select-none shadow-sm border-2 ${
                 activeTabId === tab.id
-                  ? "bg-blue-600 text-white border-blue-600 font-bold shadow-md transform scale-105"
-                  : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                  ? "bg-gradient-to-r from-blue-500 to-blue-600 text-white border-blue-600 font-bold shadow-lg transform scale-105 hover:shadow-xl"
+                  : "bg-white text-slate-600 border-slate-200 hover:bg-gradient-to-r hover:from-slate-50 hover:to-slate-100 hover:border-slate-300"
               }`}
               onClick={() => setActiveTabId(tab.id)}
             >
-              <span className="whitespace-nowrap">فاتورة {tab.id}</span>
+              <span className="whitespace-nowrap font-semibold">📄 فاتورة {tab.id}</span>
               {tabs.length > 1 && (
                 <X
-                  className={`w-4 h-4 rounded-full p-0.5 transition-colors ${activeTabId === tab.id ? "hover:bg-blue-500 text-blue-100" : "hover:bg-slate-200 text-slate-400"}`}
+                  className={`w-4 h-4 rounded-full p-0.5 transition-colors cursor-pointer hover:scale-110 ${activeTabId === tab.id ? "hover:bg-blue-400 text-blue-100" : "hover:bg-slate-300 text-slate-400"}`}
                   onClick={(e) => {
                     e.stopPropagation();
                     closeTab(tab.id);
@@ -814,87 +1168,121 @@ const SalesInterface = ({ currentUser, soundEnabled = true, allowPriceEdit = fal
             variant="ghost"
             size="sm"
             onClick={addNewTab}
-            className="rounded-full w-9 h-9 p-0 bg-white hover:bg-blue-50 border border-slate-200 shadow-sm text-blue-600"
+            className="rounded-xl w-10 h-10 p-0 bg-white hover:bg-blue-50 border-2 border-slate-200 hover:border-blue-300 shadow-sm text-blue-600 font-bold transition-all hover:scale-110"
             title="فاتورة جديدة"
           >
             <Plus className="w-5 h-5" />
           </Button>
         </div>
 
-        <Card className="w-full flex-1 flex flex-col overflow-hidden shadow-lg border-0 rounded-2xl bg-white ring-1 ring-slate-900/5">
-        <CardHeader className="p-4 pb-3 shrink-0 border-b border-slate-100 bg-white z-10">
-          <CardTitle className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="flex items-center text-lg font-bold text-slate-800">
-                <div className={`p-2 rounded-lg ml-3 ${activeTab.editingSaleId ? "bg-orange-100 text-orange-600" : "bg-blue-100 text-blue-600"}`}>
-                  <ShoppingCart className="w-5 h-5" />
+        <Card className="w-full flex-1 flex flex-col overflow-hidden shadow-xl border-0 rounded-3xl bg-gradient-to-br from-white to-slate-50 ring-1 ring-slate-900/5">
+        <CardHeader className="p-5 pb-4 shrink-0 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white z-10">
+          <CardTitle className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="flex items-center text-lg font-bold">
+                <div className={`p-3 rounded-2xl ml-3 ${activeTab.editingSaleId ? "bg-gradient-to-br from-orange-100 to-orange-50 text-orange-600" : "bg-gradient-to-br from-blue-100 to-blue-50 text-blue-600"}`}>
+                  <ShoppingCart className="w-6 h-6" />
                 </div>
-                {activeTab.editingSaleId ? <span className="text-orange-600">تعديل الفاتورة #{activeTab.editingSaleId}</span> : "سلة المشتريات"}
+                <span className={activeTab.editingSaleId ? "text-orange-600 font-bold" : "text-slate-800"}>
+                  {activeTab.editingSaleId ? `✏️ تعديل الفاتورة #${activeTab.editingSaleId}` : "🛒 سلة المشتريات"}
+                </span>
               </span>
-              <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full hover:bg-slate-100" onClick={() => setShowAbout(true)} title="عن التطبيق">
-                <Info className="w-5 h-5 text-slate-500" />
-              </Button>
-              <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full hover:bg-blue-50" onClick={() => setFreezeOpen(true)} title="تجميد منتجات (تحويل مخزون)">
-                <Snowflake className="w-5 h-5 text-blue-400" />
-              </Button>
-              <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full hover:bg-slate-100" onClick={() => setShowSettings(true)} title="إعدادات المركز">
-                <Settings className="w-5 h-5 text-slate-500" />
-              </Button>
+              <Badge variant="secondary" className="bg-slate-100 text-slate-600 rounded-full">
+                فاتورة {activeTabId}
+              </Badge>
             </div>
             
             <div className="flex items-center gap-2">
-              <Popover open={productSearchOpen} onOpenChange={setProductSearchOpen}>
-                <Button variant="outline" size="icon" className="h-10 w-10 rounded-xl border-slate-200 hover:border-blue-300 hover:bg-blue-50 text-slate-600" onClick={handleRetrieveLastSale} title="استرجاع آخر فاتورة">
-                  <RotateCcw className="h-5 w-5" />
-                </Button>
-                <PopoverTrigger asChild>
-                  <Button variant="outline" role="combobox" aria-expanded={productSearchOpen} className="w-[200px] h-10 rounded-xl border-slate-200 text-slate-600 justify-between hover:border-blue-300 hover:bg-slate-50">
-                    <span className="flex items-center gap-2"><Search className="w-4 h-4" /> بحث بالاسم...</span>
-                    <ChevronsUpDown className="mr-2 h-4 w-4 shrink-0 opacity-50" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-[300px] p-0">
-                  <Command shouldFilter={false}> 
-                    <CommandInput placeholder="اكتب اسم المنتج..." onValueChange={setProductSearchQuery} />
-                    <CommandList>
-                      <CommandEmpty>لا يوجد منتج بهذا الاسم.</CommandEmpty>
-                      <CommandGroup>
-                        {products
-                          .filter(p => p.name.toLowerCase().includes(productSearchQuery.toLowerCase()))
-                          .slice(0, 30) // تحسين الأداء: عرض أول 30 نتيجة فقط
-                          .map((product) => (
-                          <CommandItem
-                            key={product.id}
-                            value={product.name}
-                            onSelect={() => {
-                              addToCart(product);
-                              setProductSearchOpen(false);
-                            }}
-                          >
-                            {product.name}
-                          </CommandItem>
-                        ))}
-                      </CommandGroup>
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
-              <div className="relative">
-                <Barcode className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <Input
-                  ref={barcodeInputRef}
-                  type="text"
-                  placeholder="امسح الباركود..."
-                  className="w-48 h-10 pl-9 text-right text-sm rounded-xl border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all"
-                  value={barcode}
-                  onChange={(e) => setBarcode(e.target.value)}
-                  onKeyDown={handleBarcodeScan}
-                  autoFocus
-                />
-              </div>
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-9 w-9 rounded-xl hover:bg-slate-100 transition-all" 
+                onClick={() => setShowAbout(true)} 
+                title="عن التطبيق"
+              >
+                <Info className="w-5 h-5 text-slate-400 hover:text-slate-600" />
+              </Button>
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-9 w-9 rounded-xl hover:bg-blue-50 transition-all" 
+                onClick={() => setFreezeOpen(true)} 
+                title="❄️ تجميد منتجات"
+              >
+                <Snowflake className="w-5 h-5 text-blue-400" />
+              </Button>
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-9 w-9 rounded-xl hover:bg-slate-100 transition-all" 
+                onClick={() => setShowSettings(true)} 
+                title="⚙️ إعدادات"
+              >
+                <Settings className="w-5 h-5 text-slate-400" />
+              </Button>
             </div>
           </CardTitle>
         </CardHeader>
+
+        {/* شريط البحث والعمليات */}
+        <div className="p-4 bg-white border-b border-slate-100 flex gap-2 items-center flex-wrap">
+          <Popover open={productSearchOpen} onOpenChange={setProductSearchOpen}>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-10 w-10 rounded-xl border-slate-200 hover:border-blue-300 hover:bg-blue-50 text-slate-600"
+              onClick={() => setShowRetrieveDialog(true)}
+              title="استرجاع فاتورة"
+            >
+              <RotateCcw className="h-5 w-5" />
+            </Button>
+            <PopoverTrigger asChild>
+              <Button variant="outline" role="combobox" aria-expanded={productSearchOpen} className="w-[200px] h-10 rounded-xl border-slate-200 text-slate-600 justify-between hover:border-blue-300 hover:bg-slate-50">
+                <span className="flex items-center gap-2"><Search className="w-4 h-4" /> بحث بالاسم...</span>
+                <ChevronsUpDown className="mr-2 h-4 w-4 shrink-0 opacity-50" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[300px] p-0">
+              <Command shouldFilter={false}> 
+                <CommandInput placeholder="اكتب اسم المنتج..." onValueChange={setProductSearchQuery} />
+                <CommandList>
+                  <CommandEmpty>لا يوجد منتج بهذا الاسم.</CommandEmpty>
+                  <CommandGroup>
+                    {productSearchQuery.trim() && products
+                      .filter(p => p.name.toLowerCase().includes(productSearchQuery.toLowerCase()))
+                      .map((product) => (
+                      <CommandItem
+                        key={product.id}
+                        value={product.name}
+                        onSelect={() => {
+                          addToCart(product);
+                          setProductSearchOpen(false);
+                        }}
+                      >
+                        {product.name}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+
+          <div className="relative flex-1">
+            <Barcode className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <Input
+              ref={barcodeInputRef}
+              type="text"
+              placeholder="امسح الباركود..."
+              className="w-full h-10 pl-9 text-right text-sm rounded-xl border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all"
+              value={barcode}
+              onChange={(e) => setBarcode(e.target.value)}
+              onKeyDown={handleBarcodeScan}
+              autoFocus
+            />
+          </div>
+        </div>
+
         <CardContent className="p-0 flex-1 flex flex-col overflow-hidden bg-slate-50/30">
           {/* قائمة المنتجات المضافة - مع سكرول */}
           <div className="flex-1 overflow-y-auto bg-white" ref={cartScrollRef}>
@@ -911,10 +1299,11 @@ const SalesInterface = ({ currentUser, soundEnabled = true, allowPriceEdit = fal
               <TableBody>
                 {cart.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="h-48 text-center text-slate-400">
-                      <div className="flex flex-col items-center justify-center gap-2">
-                        <ShoppingCart className="w-12 h-12 opacity-20" />
-                        <p>السلة فارغة، ابدأ بإضافة المنتجات</p>
+                    <TableCell colSpan={5} className="h-56 text-center">
+                      <div className="flex flex-col items-center justify-center gap-4">
+                        <div className="text-6xl animate-bounce">🛒</div>
+                        <p className="text-slate-500 font-semibold text-lg">السلة فارغة</p>
+                        <p className="text-slate-400 text-sm">ابدأ بإضافة المنتجات من الجانب أو استخدم البحث</p>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -983,52 +1372,57 @@ const SalesInterface = ({ currentUser, soundEnabled = true, allowPriceEdit = fal
           </div>
 
           {/* ملخص الفاتورة + الدفع + الإجراءات (تصميم مضغوط) */}
-          <div className="mt-auto shrink-0 bg-white border-t border-slate-100 shadow-[0_-5px_15px_-5px_rgba(0,0,0,0.05)] z-20 p-3 space-y-2">
+          <div className="mt-auto shrink-0 bg-gradient-to-t from-slate-50 to-white border-t-2 border-slate-100 shadow-[0_-5px_25px_-5px_rgba(0,0,0,0.1)] z-20 p-4 space-y-3 rounded-t-2xl">
             
             {/* الصف الأول: الأرقام (العدد، المجموع، الخصم، الإجمالي) */}
-            <div className="flex items-center justify-between gap-2 text-sm">
-               <div className="flex items-center gap-2 bg-slate-50 px-2 py-1 rounded-md border border-slate-100">
-                 <span className="text-slate-500 text-xs">العدد:</span>
-                 <span className="font-bold text-slate-800">{itemsCount}</span>
+            <div className="flex items-center justify-between gap-3 text-sm">
+               <div className="flex items-center gap-2 bg-gradient-to-r from-slate-100 to-slate-50 px-3 py-2 rounded-lg border border-slate-200 shadow-sm">
+                 <span className="text-slate-600 font-semibold text-xs">📦 العدد:</span>
+                 <span className="font-bold text-slate-800 text-lg">{itemsCount}</span>
                </div>
-               <div className="flex items-center gap-2 bg-slate-50 px-2 py-1 rounded-md border border-slate-100">
-                 <span className="text-slate-500 text-xs">المجموع:</span>
-                 <span className="font-bold text-slate-800">{formatCurrency(subTotal)}</span>
+               <div className="flex items-center gap-2 bg-gradient-to-r from-slate-100 to-slate-50 px-3 py-2 rounded-lg border border-slate-200 shadow-sm">
+                 <span className="text-slate-600 font-semibold text-xs">💰 المجموع:</span>
+                 <span className="font-bold text-slate-800 text-lg">{formatCurrency(subTotal)}</span>
                </div>
-               <div className="flex items-center gap-1">
-                 <span className="text-slate-500 text-xs">الخصم:</span>
+               
+               {/* مربع الخصم - محسّن وبارز */}
+               <div className="flex items-center gap-2 bg-gradient-to-r from-amber-100 to-orange-50 px-4 py-2 rounded-xl border-2 border-amber-300 shadow-lg hover:shadow-xl transition-all">
+                 <span className="text-amber-700 font-bold text-sm">🏷️ الخصم:</span>
                  <Input
                     type="number"
                     value={discount}
                     onChange={(e) => updateActiveTab({ discount: Number(e.target.value) || 0 })}
-                    className="w-16 h-7 text-center bg-slate-50 border-slate-200 focus:border-blue-500 text-xs px-1"
+                    className="w-20 h-8 text-center bg-white border-amber-300 border-2 focus:border-amber-500 focus:ring-2 focus:ring-amber-200 text-sm font-bold text-amber-700 rounded-lg shadow-sm"
+                    min="0"
                   />
+                 <span className="text-amber-700 font-semibold text-xs">د.ع</span>
                </div>
-               <div className="flex items-center gap-2 bg-blue-50 px-3 py-1 rounded-lg border border-blue-100 ml-auto">
-                 <span className="text-blue-600 font-bold text-xs">الإجمالي:</span>
-                 <span className="text-lg font-black text-blue-700">{formatCurrency(total)}</span>
+               
+               <div className="flex items-center gap-2 bg-gradient-to-r from-green-100 to-emerald-50 px-4 py-2 rounded-xl border-2 border-green-300 ml-auto shadow-lg">
+                 <span className="text-green-700 font-bold text-xs">✅ الإجمالي:</span>
+                 <span className="text-lg font-black text-green-700">{formatCurrency(total)}</span>
                </div>
             </div>
 
             {/* الصف الجديد: المبلغ المستلم والباقي */}
             <div className="grid grid-cols-2 gap-3">
                <div className="relative">
-                 <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-                   <Banknote className="w-4 h-4 text-slate-400" />
+                 <div className="absolute inset-y-0 right-0 flex items-center pr-4 pointer-events-none">
+                   <Banknote className="w-5 h-5 text-blue-500 font-bold" />
                  </div>
                  <Input
                    type="number"
-                   className="pl-14 pr-9 h-10 text-lg font-bold text-slate-800 bg-slate-50 border-slate-200 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all text-left dir-ltr"
+                   className="pl-14 pr-12 h-11 text-lg font-bold text-slate-800 bg-gradient-to-r from-blue-50 to-cyan-50 border-2 border-blue-300 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all text-left dir-ltr rounded-lg shadow-md"
                    placeholder="المبلغ المستلم"
                    value={amountReceived || ''}
                    onChange={(e) => updateActiveTab({ amountReceived: parseFloat(e.target.value) || 0 })}
                    onFocus={(e) => e.target.select()}
                  />
-                 <span className="absolute -top-2 right-2 bg-white px-1 text-[10px] font-bold text-slate-500">المبلغ المستلم</span>
+                 <span className="absolute -top-2.5 right-3 bg-white px-2 text-[11px] font-bold text-blue-600 rounded">💵 المستلم</span>
                  <Button 
                     variant="ghost" 
                     size="sm" 
-                    className="absolute left-1 top-1 h-8 text-[10px] text-blue-600 hover:bg-blue-50 px-2 font-bold"
+                    className="absolute left-1 top-1.5 h-8 text-[11px] text-blue-600 hover:bg-blue-100 px-2 font-bold rounded-md transition-all"
                     onClick={() => updateActiveTab({ amountReceived: total })}
                     tabIndex={-1}
                   >
@@ -1036,42 +1430,42 @@ const SalesInterface = ({ currentUser, soundEnabled = true, allowPriceEdit = fal
                   </Button>
                </div>
 
-               <div className={`flex items-center justify-between px-4 rounded-xl border ${change >= 0 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'} transition-colors relative overflow-hidden h-10`}>
-                  <span className={`text-xs font-bold ${change >= 0 ? 'text-green-600' : 'text-red-500'} z-10`}>
-                    {change >= 0 ? 'الباقي للزبون:' : 'المتبقي:'}
+               <div className={`flex items-center justify-between px-4 rounded-lg border-2 ${change >= 0 ? 'bg-gradient-to-r from-green-100 to-emerald-50 border-green-400 shadow-lg' : 'bg-gradient-to-r from-red-100 to-rose-50 border-red-400 shadow-lg'} transition-all relative overflow-hidden h-11`}>
+                  <span className={`text-xs font-bold z-10 ${change >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+                    {change >= 0 ? '🎁 الباقي:' : '⚠️ متبقي:'}
                   </span>
-                  <span className={`text-lg font-black tracking-tight ${change >= 0 ? 'text-green-700' : 'text-red-600'} z-10`}>
+                  <span className={`text-lg font-black tracking-tight ${change >= 0 ? 'text-green-800' : 'text-red-700'} z-10`}>
                     {formatCurrency(Math.abs(change))}
                   </span>
-                  <Banknote className={`absolute -bottom-1 -left-1 w-8 h-8 ${change >= 0 ? 'text-green-100' : 'text-red-100'} -rotate-12`} />
+                  <Banknote className={`absolute -bottom-2 -left-2 w-10 h-10 ${change >= 0 ? 'text-green-200' : 'text-red-200'} -rotate-12 opacity-50`} />
                </div>
             </div>
 
             {/* الصف الثاني: طريقة الدفع واسم العميل */}
-            <div className="flex gap-2 items-center">
+            <div className="flex gap-3 items-center">
                {/* طريقة الدفع - تصميم أزرار مدمجة */}
                <RadioGroup
                  defaultValue="cash"
                  value={paymentMethod}
                  onValueChange={(val) => updateActiveTab({ paymentMethod: val })}
-                 className="flex gap-1 bg-slate-100 p-1 rounded-lg h-9 items-center shrink-0"
+                 className="flex gap-1 bg-gradient-to-r from-slate-100 to-slate-50 p-1.5 rounded-xl h-10 items-center shrink-0 border border-slate-200 shadow-sm"
                >
                  <div className="flex items-center">
                    <RadioGroupItem value="cash" id="cash" className="peer sr-only" />
-                   <Label htmlFor="cash" className="px-3 py-1 rounded-md cursor-pointer text-xs font-bold text-slate-500 peer-data-[state=checked]:bg-white peer-data-[state=checked]:text-blue-600 peer-data-[state=checked]:shadow-sm transition-all select-none">
-                     كاش
+                   <Label htmlFor="cash" className="px-3 py-1.5 rounded-lg cursor-pointer text-xs font-bold text-slate-600 peer-data-[state=checked]:bg-white peer-data-[state=checked]:text-blue-600 peer-data-[state=checked]:shadow-md transition-all select-none">
+                     💵 كاش
                    </Label>
                  </div>
                  <div className="flex items-center">
                    <RadioGroupItem value="mastercard" id="mastercard" className="peer sr-only" />
-                   <Label htmlFor="mastercard" className="px-3 py-1 rounded-md cursor-pointer text-xs font-bold text-slate-500 peer-data-[state=checked]:bg-white peer-data-[state=checked]:text-blue-600 peer-data-[state=checked]:shadow-sm transition-all select-none">
-                     ماستر
+                   <Label htmlFor="mastercard" className="px-3 py-1.5 rounded-lg cursor-pointer text-xs font-bold text-slate-600 peer-data-[state=checked]:bg-white peer-data-[state=checked]:text-blue-600 peer-data-[state=checked]:shadow-md transition-all select-none">
+                     💳 ماستر
                    </Label>
                  </div>
                  <div className="flex items-center">
                    <RadioGroupItem value="debt" id="debt" className="peer sr-only" />
-                   <Label htmlFor="debt" className="px-3 py-1 rounded-md cursor-pointer text-xs font-bold text-slate-500 peer-data-[state=checked]:bg-white peer-data-[state=checked]:text-red-600 peer-data-[state=checked]:shadow-sm transition-all select-none">
-                     آجل
+                   <Label htmlFor="debt" className="px-3 py-1.5 rounded-lg cursor-pointer text-xs font-bold text-slate-600 peer-data-[state=checked]:bg-white peer-data-[state=checked]:text-red-600 peer-data-[state=checked]:shadow-md transition-all select-none">
+                     📝 آجل
                    </Label>
                  </div>
                </RadioGroup>
@@ -1080,24 +1474,25 @@ const SalesInterface = ({ currentUser, soundEnabled = true, allowPriceEdit = fal
                <div className="flex-1 min-w-0">
                   <Input
                     type="text"
-                    placeholder="اسم العميل..."
+                    placeholder="👤 اسم العميل..."
                     value={clientName || ""}
                     onChange={(e) => updateActiveTab({ clientName: e.target.value })}
-                    className="h-9 bg-slate-50 border-slate-200 focus:bg-white transition-colors text-sm w-full"
+                    className="h-10 bg-gradient-to-r from-slate-100 to-slate-50 border-2 border-slate-200 focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all text-sm w-full rounded-lg font-semibold shadow-sm"
                   />
                </div>
             </div>
 
             {/* الصف الثالث (مشروط): اختيار العميل للدين */}
             {paymentMethod === 'debt' && (
-              <div className="w-full animate-in fade-in slide-in-from-top-1 duration-200">
+              <div className="w-full animate-in fade-in slide-in-from-top-1 duration-200 bg-gradient-to-r from-red-100 to-red-50 p-3 rounded-xl border-2 border-red-300 shadow-md">
+                 <p className="text-xs font-bold text-red-700 mb-2 flex items-center gap-1">📝 حساب العميل (ديون)</p>
                  <Popover open={clientSearchOpen} onOpenChange={setClientSearchOpen}>
                     <PopoverTrigger asChild>
-                      <Button variant="outline" role="combobox" aria-expanded={clientSearchOpen} className="w-full justify-between h-8 border-red-200 bg-red-50 text-red-700 hover:bg-red-100 hover:text-red-800 text-xs">
+                      <Button variant="outline" role="combobox" aria-expanded={clientSearchOpen} className="w-full justify-between h-10 border-2 border-red-400 bg-white text-red-700 hover:bg-red-50 hover:border-red-500 text-sm font-bold shadow-sm">
                         {selectedClientId
                           ? clients.find((client) => String(client.id) === selectedClientId)?.name
-                          : "اختر حساب العميل للدين..."}
-                        <ChevronsUpDown className="ml-2 h-3 w-3 shrink-0 opacity-50" />
+                          : "👤 اختر حساب العميل..."}
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-70" />
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent className="w-[300px] p-0" align="start">
@@ -1129,15 +1524,20 @@ const SalesInterface = ({ currentUser, soundEnabled = true, allowPriceEdit = fal
             )}
 
             {/* الصف الرابع: زر الإجراء */}
-            <div className="flex gap-2 pt-1">
+            <div className="flex gap-2 pt-2 flex-wrap">
                {activeTab.editingSaleId && (
-                  <Button variant="outline" onClick={cancelEdit} className="h-10 px-4 text-red-600 border-red-200 hover:bg-red-50 font-bold">
-                    إلغاء
+                  <Button 
+                    variant="outline" 
+                    onClick={cancelEdit} 
+                    className="h-11 px-5 text-red-600 border-2 border-red-300 bg-red-50 hover:bg-red-100 font-bold rounded-xl transition-all hover:shadow-md text-sm"
+                  >
+                    ❌ إلغاء
                   </Button>
                )}
+               
                <Button
                   onClick={handleCreateSale}
-                  className={`flex-1 h-10 text-base font-bold shadow-md transition-all hover:scale-[1.01] rounded-xl ${activeTab.editingSaleId ? "bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white shadow-orange-200" : "bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white shadow-blue-200"}`}
+                  className="flex-1 h-11 text-base font-bold shadow-lg transition-all hover:shadow-xl hover:scale-[1.01] rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-emerald-300/50"
                   disabled={cart.length === 0 || createSale.isPending || updateSaleMutation.isPending}
                >
                   {createSale.isPending || updateSaleMutation.isPending ? (
@@ -1146,7 +1546,7 @@ const SalesInterface = ({ currentUser, soundEnabled = true, allowPriceEdit = fal
                       جاري المعالجة...
                     </span>
                   ) : (
-                    activeTab.editingSaleId ? "حفظ التعديلات" : "إتمام عملية البيع"
+                    activeTab.editingSaleId ? "💾 حفظ التعديلات" : "✅ إتمام عملية البيع"
                   )}
                </Button>
             </div>
@@ -1267,8 +1667,73 @@ const SalesInterface = ({ currentUser, soundEnabled = true, allowPriceEdit = fal
       )}
 
       {/* نافذة تجميد المنتجات */}
+      <Dialog open={showRetrieveDialog} onOpenChange={setShowRetrieveDialog}>
+        <DialogContent className="sm:max-w-[460px]" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-blue-700">
+              <RotateCcw className="w-5 h-5" />
+              استرجاع فاتورة للتعديل
+            </DialogTitle>
+            <DialogDescription>
+              اختر طريقة الاسترجاع: آخر فاتورة مباشرة، أو إدخال رقم فاتورة محدد.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <RadioGroup
+              value={retrieveMode}
+              onValueChange={(value) => setRetrieveMode(value as "last" | "number")}
+              className="space-y-2"
+            >
+              <div className="flex items-center gap-2 rounded-lg border border-slate-200 p-3">
+                <RadioGroupItem value="last" id="retrieve-last-sale" />
+                <Label htmlFor="retrieve-last-sale" className="cursor-pointer">
+                  استرجاع آخر فاتورة
+                </Label>
+              </div>
+              <div className="flex items-center gap-2 rounded-lg border border-slate-200 p-3">
+                <RadioGroupItem value="number" id="retrieve-by-number" />
+                <Label htmlFor="retrieve-by-number" className="cursor-pointer">
+                  استرجاع فاتورة برقم
+                </Label>
+              </div>
+            </RadioGroup>
+
+            {retrieveMode === "number" && (
+              <div className="space-y-2">
+                <Label htmlFor="invoice-number-input">رقم الفاتورة</Label>
+                <Input
+                  id="invoice-number-input"
+                  value={retrieveInvoiceInput}
+                  onChange={(e) => setRetrieveInvoiceInput(e.target.value)}
+                  placeholder="مثال: 152 أو INV-000152"
+                  disabled={isRetrievingSale}
+                />
+                <p className="text-xs text-slate-500">
+                  يمكنك إدخال الرقم فقط أو صيغة رقم الفاتورة كاملة.
+                </p>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowRetrieveDialog(false)} disabled={isRetrievingSale}>
+              إلغاء
+            </Button>
+            <Button
+              onClick={retrieveMode === "last" ? handleRetrieveLastSale : handleRetrieveSaleByNumber}
+              disabled={isRetrievingSale || (retrieveMode === "number" && !retrieveInvoiceInput.trim())}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              {isRetrievingSale ? "جاري الاسترجاع..." : "استرجاع الفاتورة"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* نافذة تجميد المنتجات */}
       <Dialog open={freezeOpen} onOpenChange={setFreezeOpen}>
-        <DialogContent className="sm:max-w-[500px]" dir="rtl">
+        <DialogContent className="sm:max-w-[600px]" dir="rtl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-blue-700">
               <Snowflake className="w-5 h-5" />
@@ -1279,32 +1744,116 @@ const SalesInterface = ({ currentUser, soundEnabled = true, allowPriceEdit = fal
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
+            {/* المنتج الطازج (المصدر) */}
             <div className="space-y-2">
               <Label>المنتج الطازج (المصدر)</Label>
-              <Select value={freezeSourceId} onValueChange={setFreezeSourceId}>
-                <SelectTrigger><SelectValue placeholder="اختر المنتج الطازج..." /></SelectTrigger>
-                <SelectContent dir="rtl">
-                  {products.filter(p => p.categoryName === "الريان").map(p => (
-                    <SelectItem key={p.id} value={String(p.id)}>{p.name} (المتوفر: {p.stock})</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Popover open={freezeSourceSearchOpen} onOpenChange={setFreezeSourceSearchOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="w-full justify-between"
+                  >
+                    {freezeSourceId 
+                      ? products.find(p => String(p.id) === freezeSourceId)?.name 
+                      : "اختر المنتج الطازج..."}
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[350px] p-0 max-h-[400px]" dir="rtl">
+                  <Command shouldFilter={false}>
+                    <CommandInput 
+                      placeholder="ابحث عن المنتج..." 
+                      value={freezeSourceSearch}
+                      onValueChange={setFreezeSourceSearch}
+                    />
+                    <CommandEmpty>لم يتم العثور على منتجات.</CommandEmpty>
+                    <CommandGroup>
+                      <CommandList className="max-h-[350px] overflow-y-auto">
+                        {filteredFreezeSourceProducts.map((p) => (
+                          <CommandItem
+                            key={p.id}
+                            value={String(p.id)}
+                            onSelect={(value) => {
+                              setFreezeSourceId(value);
+                              setFreezeSourceSearch("");
+                              setFreezeSourceSearchOpen(false);
+                            }}
+                          >
+                            <Check
+                              className={cn(
+                                "mr-2 h-4 w-4",
+                                freezeSourceId === String(p.id) ? "opacity-100" : "opacity-0"
+                              )}
+                            />
+                            <div className="flex-1">
+                              <div className="font-medium">{p.name}</div>
+                              <div className="text-xs text-slate-500">المتوفر: {p.stock}</div>
+                            </div>
+                          </CommandItem>
+                        ))}
+                      </CommandList>
+                    </CommandGroup>
+                  </Command>
+                </PopoverContent>
+              </Popover>
             </div>
             
             <div className="flex justify-center">
               <ArrowRightLeft className="w-6 h-6 text-slate-400 rotate-90" />
             </div>
 
+            {/* المنتج المجمد (الهدف) */}
             <div className="space-y-2">
               <Label>المنتج المجمد (الهدف)</Label>
-              <Select value={freezeTargetId} onValueChange={setFreezeTargetId}>
-                <SelectTrigger><SelectValue placeholder="اختر المنتج المجمد..." /></SelectTrigger>
-                <SelectContent dir="rtl">
-                  {products.filter(p => p.categoryName !== "الريان").map(p => (
-                    <SelectItem key={p.id} value={String(p.id)}>{p.name} (المتوفر: {p.stock})</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Popover open={freezeTargetSearchOpen} onOpenChange={setFreezeTargetSearchOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="w-full justify-between"
+                  >
+                    {freezeTargetId 
+                      ? products.find(p => String(p.id) === freezeTargetId)?.name 
+                      : "اختر المنتج المجمد..."}
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[350px] p-0 max-h-[400px]" dir="rtl">
+                  <Command shouldFilter={false}>
+                    <CommandInput 
+                      placeholder="ابحث عن المنتج..." 
+                      value={freezeTargetSearch}
+                      onValueChange={setFreezeTargetSearch}
+                    />
+                    <CommandEmpty>لم يتم العثور على منتجات.</CommandEmpty>
+                    <CommandGroup>
+                      <CommandList className="max-h-[350px] overflow-y-auto">
+                        {filteredFreezeTargetProducts.map((p) => (
+                          <CommandItem
+                            key={p.id}
+                            value={String(p.id)}
+                            onSelect={(value) => {
+                              setFreezeTargetId(value);
+                              setFreezeTargetSearch("");
+                              setFreezeTargetSearchOpen(false);
+                            }}
+                          >
+                            <Check
+                              className={cn(
+                                "mr-2 h-4 w-4",
+                                freezeTargetId === String(p.id) ? "opacity-100" : "opacity-0"
+                              )}
+                            />
+                            <div className="flex-1">
+                              <div className="font-medium">{p.name}</div>
+                              <div className="text-xs text-slate-500">المتوفر: {p.stock}</div>
+                            </div>
+                          </CommandItem>
+                        ))}
+                      </CommandList>
+                    </CommandGroup>
+                  </Command>
+                </PopoverContent>
+              </Popover>
             </div>
 
             <div className="space-y-2">
@@ -1313,7 +1862,11 @@ const SalesInterface = ({ currentUser, soundEnabled = true, allowPriceEdit = fal
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setFreezeOpen(false)}>إلغاء</Button>
+            <Button variant="outline" onClick={() => {
+              setFreezeOpen(false);
+              setFreezeSourceSearch("");
+              setFreezeTargetSearch("");
+            }}>إلغاء</Button>
             <Button onClick={handleFreezeSubmit} disabled={freezeMutation.isPending} className="bg-blue-600 hover:bg-blue-700">تأكيد التحويل</Button>
           </DialogFooter>
         </DialogContent>

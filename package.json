@@ -1,8 +1,8 @@
 {
   "name": "cro-p",
-  "productName": "مركز الجمجمة",
+  "productName": "CRO P",
   "private": true,
-  "version": "0.0.1",
+  "version": "1.0.2",
   "type": "module",
   "scripts": {
     "dev": "npx vite --port 8080 --strictPort",
@@ -17,7 +17,8 @@
     "prebuild:desktop": "npx prisma db push --accept-data-loss && npx prisma db seed",
     "build:desktop": "npm run prebuild:desktop && npm run prisma:generate && npm run build && electron-builder",
     "publish:desktop": "npm run prebuild:desktop && npm run prisma:generate && npm run build && electron-builder --publish always",
-    "postinstall": "electron-rebuild",
+    "dist:win": "electron-builder --win --x64 --ia32",
+    "postinstall": "electron-builder install-app-deps",
     "prisma:generate": "npx prisma generate",
     "check-db": "node -e \"console.log('DB exists:', require('fs').existsSync('prisma/dev.db'))\"",
     "reinstall": "node clean.js && npm install"
@@ -27,7 +28,7 @@
   },
   "build": {
     "appId": "com.pos.system",
-    "productName": "مركز الجمجمة",
+    "productName": "CRO P",
     "asar": false,
     "directories": {
       "output": "dist_electron",
@@ -48,8 +49,16 @@
       "prisma/dev.db"
     ],
     "win": {
-      "target": "nsis",
-      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "ia32"
+          ]
+        }
+      ],
+      "icon": "release/.icon-ico/icon.ico",
       "signAndEditExecutable": false,
       "verifyUpdateCodeSignature": false
     },
@@ -58,9 +67,9 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "installerIcon": "build/icon.ico",
-      "uninstallerIcon": "build/icon.ico",
-      "installerHeaderIcon": "build/icon.ico"
+      "installerIcon": "release/.icon-ico/icon.ico",
+      "uninstallerIcon": "release/.icon-ico/icon.ico",
+      "installerHeaderIcon": "release/.icon-ico/icon.ico"
     },
     "publish": {
       "provider": "github",
@@ -108,8 +117,9 @@
     "cors": "^2.8.5",
     "date-fns": "^3.6.0",
     "dbffile": "^1.12.0",
-    "embla-carousel-react": "^8.3.0",
+    "dotenv": "^17.4.2",
     "electron-updater": "^6.3.0",
+    "embla-carousel-react": "^8.3.0",
     "express": "^5.1.0",
     "iconv-lite": "^0.6.3",
     "input-otp": "^1.2.4",

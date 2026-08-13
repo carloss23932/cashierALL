@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,8 +8,11 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatCurrency } from "@/lib/utils";
+import { POS_PENDING_EDIT_SALE_KEY } from "@/lib/pending-sale-edit";
+import type { PendingSaleEditPayload } from "@/lib/pending-sale-edit";
 import { Calendar, FileText, Printer, Receipt, RefreshCw, Undo, User, TrendingUp, DollarSign, Package, QrCode, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useNavigate } from "react-router-dom";
 
 interface CartItem {
   id: string;
@@ -63,11 +66,40 @@ const SalesInvoices = ({ currentUser }: { currentUser?: any }) => {
   const [storeSettings, setStoreSettings] = useState({ name: "", address: "", phone: "" });
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const navigate = useNavigate();
 
-  const { data: sales = [], isLoading: isLoadingSales } = useQuery<any[]>({
-    queryKey: ["sales"],
-    queryFn: () => window.api.listSales({ limit: 2000 }), // زيادة الحد لضمان ظهور الفواتير عند البحث
+  const REQUEST_TIMEOUT_MS = 15000;
+  const SALES_PAGE_SIZE = 300;
+  const withTimeout = <T,>(promise: Promise<T>, ms: number, message: string) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(message)), ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => {
+      if (timer) clearTimeout(timer);
+    }) as Promise<T>;
+  };
+
+  const {
+    data: salesPages,
+    isLoading: isLoadingSales,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
+  } = useInfiniteQuery<any[]>({
+    queryKey: ["sales", "paginated"],
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) => window.api.listSales({ limit: SALES_PAGE_SIZE, offset: pageParam }),
+    getNextPageParam: (lastPage, allPages) => {
+      if (!Array.isArray(lastPage) || lastPage.length < SALES_PAGE_SIZE) return undefined;
+      return allPages.length * SALES_PAGE_SIZE;
+    }
   });
+
+  const sales = useMemo(() => {
+    if (!salesPages?.pages) return [];
+    return salesPages.pages.flat();
+  }, [salesPages]);
 
   const { data: clients = [] } = useQuery({
     queryKey: ["clients"],
@@ -81,7 +113,7 @@ const SalesInvoices = ({ currentUser }: { currentUser?: any }) => {
       const name = await window.api.getAppSetting('storeName');
       const address = await window.api.getAppSetting('storeAddress');
       const phone = await window.api.getAppSetting('storePhone');
-      const settings = { name: name || "مركز الجمجمة", address: address || "", phone: phone || "" };
+      const settings = { name: name || "CRO P", address: address || "", phone: phone || "" };
       setStoreSettings(settings);
       return settings;
     }
@@ -152,7 +184,12 @@ const SalesInvoices = ({ currentUser }: { currentUser?: any }) => {
     );
 
   const updateSaleMutation = useMutation({
-    mutationFn: (payload: any) => window.api.updateSale(payload),
+    mutationFn: (payload: any) =>
+      withTimeout(
+        window.api.updateSale(payload),
+        REQUEST_TIMEOUT_MS,
+        "انتهت مهلة تعديل الفاتورة"
+      ),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["sales"] });
       setIsEditing(false);
@@ -226,6 +263,44 @@ const SalesInvoices = ({ currentUser }: { currentUser?: any }) => {
     });
   };
 
+  const handleEditInPointOfSale = () => {
+    if (!selectedInvoice) return;
+
+    const invalidItem = selectedInvoice.items.find((item) => !Number(item.productId));
+    if (invalidItem) {
+      toast({
+        title: "تعذر نقل الفاتورة",
+        description: `الصنف "${invalidItem.name}" لا يحتوي على معرف منتج صالح.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const payload: PendingSaleEditPayload = {
+      saleId: Number(selectedInvoice.id),
+      discount: Number(invoiceDiscount || selectedInvoice.discount || 0),
+      paymentMethod: editPaymentMethod || selectedInvoice.paymentMethod || "cash",
+      clientId: editClientId ? Number(editClientId) : selectedInvoice.clientId ? Number(selectedInvoice.clientId) : null,
+      clientName: editClientName || selectedInvoice.clientName || "",
+      amountReceived:
+        selectedInvoice.amountReceived !== undefined && selectedInvoice.amountReceived !== null
+          ? Number(selectedInvoice.amountReceived)
+          : Math.max(0, Number(selectedInvoice.total || 0) - Number(selectedInvoice.remaining || 0)),
+      items: selectedInvoice.items.map((item) => ({
+        productId: Number(item.productId),
+        name: item.name,
+        price: Number(item.price || 0),
+        quantity: Number(item.quantity || 0),
+        barcode: item.barcode || null,
+      })),
+    };
+
+    localStorage.setItem(POS_PENDING_EDIT_SALE_KEY, JSON.stringify(payload));
+    setIsInvoiceDialogOpen(false);
+    setIsEditing(false);
+    navigate("/");
+  };
+
   const handleReturn = () => {
     if (!selectedInvoice) return;
     
@@ -272,7 +347,7 @@ const SalesInvoices = ({ currentUser }: { currentUser?: any }) => {
   const handlePrint = async () => {
   if (!selectedInvoice) return;
   
-  const storeName = storeSettings.name || "مركز الجمجمة";
+  const storeName = storeSettings.name || "CRO P";
   const storeAddress = storeSettings.address || "";
   const storePhone = storeSettings.phone || "";
 
@@ -460,6 +535,20 @@ const SalesInvoices = ({ currentUser }: { currentUser?: any }) => {
                   </CardContent>
                 </Card>
               ))}
+              {hasNextPage && (
+                <div className="flex justify-center pt-2">
+                  <Button variant="outline" onClick={() => fetchNextPage()} disabled={isFetchingNextPage}>
+                    {isFetchingNextPage ? (
+                      <span className="flex items-center gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        جاري تحميل المزيد...
+                      </span>
+                    ) : (
+                      "تحميل المزيد"
+                    )}
+                  </Button>
+                </div>
+              )}
             </div>
           )}
         </CardContent>
@@ -699,9 +788,9 @@ const SalesInvoices = ({ currentUser }: { currentUser?: any }) => {
                   <Printer className="w-4 h-4 ml-2" />
                   طباعة وصل للزبون
                 </Button>
-                <Button variant="secondary" className="flex-1" onClick={() => setIsEditing((v) => !v)}>
+                <Button variant="secondary" className="flex-1" onClick={handleEditInPointOfSale}>
                   <RefreshCw className="w-4 h-4 ml-2" />
-                  {isEditing ? "إلغاء التعديل" : "تعديل الأصناف"}
+                  تعديل الأصناف في نقطة البيع
                 </Button>
                 {isEditing && (
                   <Button

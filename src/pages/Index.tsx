@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Calculator, BarChart3, FileText, Wallet, Receipt, Package, Plus, ShoppingCart, Shield, Upload } from "lucide-react";
+import { Calculator, BarChart3, FileText, Wallet, Receipt, Package, Plus, ShoppingCart, Shield, Upload, History } from "lucide-react";
 import SalesInterface from "@/components/SalesInterface";
 import ProductManagement from "@/components/ProductManagement";
 import ReportsSection from "@/components/ReportsSection";
@@ -12,6 +12,7 @@ import Login from "@/components/Login";
 import DebtsPage from "./debts";
 import DailyNotes from "@/components/DailyNotes";
 import ChickenLegs from "@/components/ChickenLegs";
+import InvoiceChangeLogs from "@/components/InvoiceChangeLogs";
 import { useToast } from "@/hooks/use-toast";
 
 const Index = () => {
@@ -118,7 +119,14 @@ const Index = () => {
       {/* Main Content */}
       <div className="container mx-auto px-3 py-4">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-          <TabsList className="grid w-full grid-cols-7 bg-white/60 backdrop-blur-sm border border-blue-100 h-12 text-sm" dir="rtl">
+          <TabsList className="grid w-full grid-cols-8 bg-white/60 backdrop-blur-sm border border-blue-100 h-12 text-sm" dir="rtl">
+            <TabsTrigger
+              value="invoice-logs"
+              className="flex-col gap-1 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-500 data-[state=active]:text-white"
+            >
+              <History className="w-4 h-4" />
+              <span className="text-[11px]">سجل التعديلات</span>
+            </TabsTrigger>
             <TabsTrigger
               value="reports"
               className="flex-col gap-1 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-500 data-[state=active]:text-white"
@@ -172,6 +180,9 @@ const Index = () => {
 
           <TabsContent value="sales" className="m-0">
             <SalesInterface currentUser={currentUser} />
+          </TabsContent>
+          <TabsContent value="invoice-logs" className="m-0">
+            <InvoiceChangeLogs />
           </TabsContent>
           <TabsContent value="products" className="m-0">
             <ProductManagement />

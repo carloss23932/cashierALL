@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useLocation } from "react-router-dom";
 import { Package, Plus, Search, Edit, Trash2, Barcode, FileText, Printer, Database, FilePlus, X, Save, History, ChevronLeft, ChevronRight, ChevronsUpDown } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,7 @@ import CategoryManagement from "./CategoryManagement";
 import { useToast } from "@/hooks/use-toast";
 import useBarcodeValidation from "@/hooks/useBarcodeValidation";
 import ProductHistoryModal from "./ProductHistoryModal";
+import { cn } from "@/lib/utils";
 
 interface Category {
   id: string;
@@ -39,15 +41,54 @@ interface Product {
   isOffer?: boolean;
   offerUnderlyingProductId?: number | null;
   offerUnderlyingProductQuantity?: number | null;
+  packageItems?: PackageItem[];
 }
 
+interface PackageItem {
+  productId: number | "";
+  quantity: number | "";
+}
+
+interface SmartShortageDraftItem {
+  id: number;
+  name: string;
+  toBuyQty: number;
+  boxesToBuy: number;
+}
+
+interface SmartShortageDraft {
+  createdAt: string;
+  coverageDays: number;
+  categoryId: string | number | null;
+  categoryName: string;
+  items: SmartShortageDraftItem[];
+}
+
+const matchesBarcodeSearch = (product: Partial<Product> | null | undefined, term: string) => {
+  const lookup = String(term || "").trim().toLowerCase();
+  if (!lookup) return false;
+  return String(product?.barcode || "").toLowerCase().includes(lookup);
+};
+
 const ProductManagement = ({ currentUser, purchaseMode = "units" }: { currentUser?: any, purchaseMode?: string }) => {
+  const location = useLocation();
   // دالة لتنسيق الأرقام باللغة الانجليزية
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-US', { 
       minimumFractionDigits: 0, 
       maximumFractionDigits: 2 
     }).format(value);
+  };
+
+  const REQUEST_TIMEOUT_MS = 15000;
+  const withTimeout = <T,>(promise: Promise<T>, ms: number, message: string) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(message)), ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => {
+      if (timer) clearTimeout(timer);
+    }) as Promise<T>;
   };
 
   const [categories, setCategories] = useState<Category[]>([]);
@@ -70,18 +111,24 @@ const ProductManagement = ({ currentUser, purchaseMode = "units" }: { currentUse
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [showPurchaseModal, setShowPurchaseModal] = useState(false);
   const [purchaseItems, setPurchaseItems] = useState<any[]>([]);
-  const [purchaseMeta, setPurchaseMeta] = useState({ 
-    number: "", 
-    date: new Date(Date.now() + 2 * 3600000).toISOString().split('T')[0], // تاريخ العمل (1 صباحاً)
-    cashier: currentUser?.name || currentUser?.username || "النظام",
-    supplier: ""
-  });
+  const [smartShortageDraft, setSmartShortageDraft] = useState<SmartShortageDraft | null>(null);
+  const [purchaseMeta, setPurchaseMeta] = useState<any>(null);
+
+  useEffect(() => {
+    setPurchaseMeta({
+      number: "",
+      date: new Date(Date.now() + 2 * 3600000).toISOString().split('T')[0],
+      cashier: currentUser?.name || currentUser?.username || "النظام",
+      supplier: ""
+    });
+  }, [currentUser]);
   const [purchaseSearch, setPurchaseSearch] = useState("");
   const [editingPurchaseId, setEditingPurchaseId] = useState<number | null>(null);
 
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 24;
+  const smartDraftAutoAppliedRef = useRef(false);
 
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [historyProduct, setHistoryProduct] = useState<Product | null>(null);
@@ -98,6 +145,7 @@ const ProductManagement = ({ currentUser, purchaseMode = "units" }: { currentUse
     isOffer: false,
     offerUnderlyingProductId: "",
     offerUnderlyingProductQuantity: "",
+    packageItems: [] as PackageItem[],
   });
 
   const { toast } = useToast();
@@ -138,6 +186,109 @@ const ProductManagement = ({ currentUser, purchaseMode = "units" }: { currentUse
     return purchaseHistory.filter((record: any) => record.itemsCount > 0);
   }, [purchaseHistory]);
 
+  const readSmartShortageDraft = (): SmartShortageDraft | null => {
+    try {
+      const raw = localStorage.getItem("smartShortageDraft");
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || !Array.isArray(parsed.items) || parsed.items.length === 0) return null;
+      return {
+        createdAt: String(parsed.createdAt || new Date().toISOString()),
+        coverageDays: Number(parsed.coverageDays || 0),
+        categoryId: parsed.categoryId === null || parsed.categoryId === undefined ? null : String(parsed.categoryId),
+        categoryName: String(parsed.categoryName || "كل الفئات"),
+        items: parsed.items
+          .map((item: any) => ({
+            id: Number(item?.id),
+            name: String(item?.name || ""),
+            toBuyQty: Number(item?.toBuyQty || 0),
+            boxesToBuy: Number(item?.boxesToBuy || 0),
+          }))
+          .filter((item: SmartShortageDraftItem) => Number.isFinite(item.id) && item.id > 0),
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  const clearSmartShortageDraft = (showToast = false) => {
+    localStorage.removeItem("smartShortageDraft");
+    setSmartShortageDraft(null);
+    if (showToast) {
+      toast({ title: "تم الحذف", description: "تم حذف قائمة النواقص المحفوظة." });
+    }
+  };
+
+  const applySmartShortageDraftToPurchase = (options?: { openModal?: boolean; clearAfterApply?: boolean }) => {
+    const openModal = options?.openModal !== false;
+    const clearAfterApply = options?.clearAfterApply !== false;
+    const draft = readSmartShortageDraft();
+
+    if (!draft || !draft.items.length) {
+      toast({
+        title: "لا توجد قائمة جاهزة",
+        description: "لم يتم العثور على قائمة نواقص محفوظة.",
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    const productsById = new Map((products || []).map((p: Product) => [Number(p.id), p]));
+    const preparedItems = draft.items
+      .map((item) => {
+        const product = productsById.get(Number(item.id));
+        if (!product) return null;
+        const defaultQty = purchaseMode === "boxes"
+          ? Math.max(1, Number(item.boxesToBuy || 0))
+          : Math.max(1, Number(item.toBuyQty || 0));
+        return {
+          ...product,
+          addQuantity: defaultQty,
+          newCost: Number(product.boxPurchasePrice || 0),
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null);
+
+    if (!preparedItems.length) {
+      toast({
+        title: "تعذر التحميل",
+        description: "أصناف القائمة غير موجودة حالياً ضمن المنتجات.",
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    setEditingPurchaseId(null);
+    setPurchaseItems(preparedItems);
+    setPurchaseSearch("");
+    setPurchaseMeta((prev) => ({
+      ...prev,
+      supplier: "",
+      cashier: currentUser?.name || currentUser?.username || "النظام",
+      date: prev.date || new Date(Date.now() + 2 * 3600000).toISOString().split("T")[0],
+    }));
+
+    if (draft.categoryName && draft.categoryName !== "كل الفئات") {
+      setSearchTerm(draft.categoryName);
+    }
+
+    if (openModal) {
+      setShowPurchaseModal(true);
+    }
+
+    if (clearAfterApply) {
+      clearSmartShortageDraft(false);
+    } else {
+      setSmartShortageDraft(draft);
+    }
+
+    toast({
+      title: "تم تحميل القائمة الذكية",
+      description: `تم تجهيز ${preparedItems.length} صنف داخل فاتورة الشراء.`,
+    });
+    return true;
+  };
+
   const calcPurchaseLineTotal = (item: any) => {
     const qtyInBoxes = purchaseMode === 'boxes'
       ? Number(item.addQuantity || 0)
@@ -165,6 +316,20 @@ const ProductManagement = ({ currentUser, purchaseMode = "units" }: { currentUse
     }));
     setCategories(converted);
   }, [categoriesData]);
+
+  useEffect(() => {
+    setSmartShortageDraft(readSmartShortageDraft());
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get("smartShortages") !== "1") return;
+    if (!products.length) return;
+    if (smartDraftAutoAppliedRef.current) return;
+
+    smartDraftAutoAppliedRef.current = true;
+    applySmartShortageDraftToPurchase({ openModal: true, clearAfterApply: true });
+  }, [location.search, products, purchaseMode]);
 
   useEffect(() => {
     if (!showPurchaseModal) {
@@ -219,16 +384,21 @@ const ProductManagement = ({ currentUser, purchaseMode = "units" }: { currentUse
 
   // تحديث اسم الكاشير تلقائياً عند فتح نافذة الشراء لضمان تسجيل المستخدم الحالي (سواء كان المدير أو بائع)
   useEffect(() => {
-    if (showPurchaseModal && editingPurchaseId === null) {
+    if (showPurchaseModal && editingPurchaseId === null && purchaseMeta) {
       setPurchaseMeta(prev => ({
         ...prev,
         cashier: currentUser?.name || currentUser?.username || "النظام"
       }));
     }
-  }, [showPurchaseModal, editingPurchaseId, currentUser]);
+  }, [showPurchaseModal, editingPurchaseId]);
 
   const upsertMutation = useMutation({
-    mutationFn: (product: any) => window.api.upsertProduct(product),
+    mutationFn: (product: any) =>
+      withTimeout(
+        window.api.upsertProduct(product),
+        REQUEST_TIMEOUT_MS,
+        "انتهت مهلة حفظ المنتج"
+      ),
     // Invalidation is handled in handleSubmit to ensure it runs after setting the alternative product
   });
 
@@ -261,11 +431,35 @@ const ProductManagement = ({ currentUser, purchaseMode = "units" }: { currentUse
       isOffer: false,
       offerUnderlyingProductId: "",
       offerUnderlyingProductQuantity: "",
+      packageItems: [],
     });
 
   const generateBarcode = () => {
     const barcode = Math.floor(Math.random() * 1000000000).toString();
     setFormData({ ...formData, barcode });
+  };
+
+  const addPackageItem = () => {
+    setFormData((prev) => ({
+      ...prev,
+      packageItems: [...prev.packageItems, { productId: "", quantity: 1 }],
+    }));
+  };
+
+  const updatePackageItem = (index: number, updates: Partial<PackageItem>) => {
+    setFormData((prev) => ({
+      ...prev,
+      packageItems: prev.packageItems.map((item, itemIndex) =>
+        itemIndex === index ? { ...item, ...updates } : item
+      ),
+    }));
+  };
+
+  const removePackageItem = (index: number) => {
+    setFormData((prev) => ({
+      ...prev,
+      packageItems: prev.packageItems.filter((_, itemIndex) => itemIndex !== index),
+    }));
   };
 
   const handlePrintRayanInventory = async () => {
@@ -537,24 +731,48 @@ const ProductManagement = ({ currentUser, purchaseMode = "units" }: { currentUse
     }
 
     const unitPrice = boxSale > 0 ? boxSale / units : Number(formData.price || 0);
+    const packageItems = formData.packageItems
+      .map((item) => ({
+        productId: Number(item.productId),
+        quantity: Number(item.quantity),
+      }))
+      .filter((item) => Number.isInteger(item.productId) && item.productId > 0 && Number.isFinite(item.quantity) && item.quantity > 0);
 
-    const conflictResult = await validate(formData.barcode, async (b) => {
-      const code = String(b || "").trim();
-      if (!code) return null;
-      const conflict = products.find((p: any) => p.barcode === code && (!editingProduct || p.id !== editingProduct.id));
-      return conflict || null;
-    });
-    if (conflictResult.status !== "ok") {
+    if (formData.isOffer && packageItems.length === 0) {
+      toast({
+        title: "مكونات البكج مطلوبة",
+        description: "اختر منتجاً واحداً على الأقل وحدد الكمية داخل البكج.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const normalizedBarcode = String(formData.barcode || "").trim();
+    const deletedConflictIds = new Set<number>();
+
+    if (normalizedBarcode) {
+      const conflictResult = await validate(normalizedBarcode, async (b) => {
+        const code = String(b || "").trim();
+        if (!code) return null;
+        const conflict = products.find(
+          (p: any) =>
+            !deletedConflictIds.has(Number(p.id)) &&
+            (!editingProduct || p.id !== editingProduct.id) &&
+            String(p.barcode || "").trim() === code
+        );
+        return conflict || null;
+      });
       if (conflictResult.status === "abort") return;
       if (conflictResult.status === "edit") {
-        handleEdit(conflictResult.product);
+        handleEdit(conflictResult.product as Product);
         return;
       }
       if (conflictResult.status === "delete") {
-        const conflictId = conflictResult.product.id;
+        const conflictId = Number(conflictResult.product.id);
         if (!conflictId) return;
         try {
-          await deleteMutation.mutateAsync(Number(conflictId));
+          await deleteMutation.mutateAsync(conflictId);
+          deletedConflictIds.add(conflictId);
         } catch {
           /* ignore */
         }
@@ -566,14 +784,19 @@ const ProductManagement = ({ currentUser, purchaseMode = "units" }: { currentUse
       name: formData.name.trim(),
       price: unitPrice || 0,
       stock: parseInt(formData.stock) || 0,
-      barcode: formData.barcode.trim() || undefined,
+      barcode: normalizedBarcode || undefined,
       categoryId: (formData.categoryId && formData.categoryId !== "") ? Number(formData.categoryId) : undefined,
       unitsPerBox: units,
       boxPurchasePrice: boxPurchase || 0,
       boxSalePrice: boxSale || 0,
       isOffer: formData.isOffer,
-      offerUnderlyingProductId: formData.isOffer ? formData.offerUnderlyingProductId : null,
-      offerUnderlyingProductQuantity: formData.isOffer ? formData.offerUnderlyingProductQuantity : null,
+      offerUnderlyingProductId: formData.isOffer && packageItems[0]?.productId
+        ? Number(packageItems[0].productId)
+        : null,
+      offerUnderlyingProductQuantity: formData.isOffer && packageItems[0]?.quantity
+        ? Number(packageItems[0].quantity)
+        : null,
+      packageItems: formData.isOffer ? packageItems : [],
     };
 
     const savedProduct = await upsertMutation.mutateAsync(newProduct)
@@ -607,6 +830,14 @@ const ProductManagement = ({ currentUser, purchaseMode = "units" }: { currentUse
       isOffer: product.isOffer || false,
       offerUnderlyingProductId: product.offerUnderlyingProductId ? String(product.offerUnderlyingProductId) : "",
       offerUnderlyingProductQuantity: product.offerUnderlyingProductQuantity ? String(product.offerUnderlyingProductQuantity) : "",
+      packageItems: Array.isArray(product.packageItems) && product.packageItems.length > 0
+        ? product.packageItems.map((item) => ({
+            productId: Number(item.productId),
+            quantity: Number(item.quantity),
+          }))
+        : product.offerUnderlyingProductId
+          ? [{ productId: Number(product.offerUnderlyingProductId), quantity: Number(product.offerUnderlyingProductQuantity || 1) }]
+          : [],
     });
     setIsDialogOpen(true);
   };
@@ -644,7 +875,8 @@ const ProductManagement = ({ currentUser, purchaseMode = "units" }: { currentUse
   const filteredProducts = products.filter(
     (product) =>
       product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      product.categoryName?.toLowerCase().includes(searchTerm.toLowerCase())
+      product.categoryName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      matchesBarcodeSearch(product, searchTerm)
   );
 
   // Pagination Logic
@@ -663,34 +895,69 @@ const ProductManagement = ({ currentUser, purchaseMode = "units" }: { currentUse
     return category?.color || "#6B7280";
   };
 
+  const lowStockProductsCount = useMemo(
+    () => products.filter((product) => Number(product.stock || 0) <= 10).length,
+    [products]
+  );
+
+  const inventoryEstimatedValue = useMemo(
+    () =>
+      products.reduce(
+        (sum, product) => sum + Number(product.stock || 0) * Number(product.price || 0),
+        0
+      ),
+    [products]
+  );
+
   return (
-    <div className="space-y-6" dir="rtl">
+    <div className="relative space-y-6 pb-4" dir="rtl">
       {ConflictDialog}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <h2 className="text-2xl font-bold text-blue-800">إدارة المنتجات</h2>
-        <div className="flex gap-2">
-          <Button onClick={() => setShowHistoryModal(true)} variant="outline" className="gap-2 border-purple-200 text-purple-700 hover:bg-purple-50">
+      <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
+        <div className="absolute -top-32 right-0 h-72 w-72 rounded-full bg-cyan-200/30 blur-3xl" />
+        <div className="absolute top-40 -left-16 h-80 w-80 rounded-full bg-emerald-200/30 blur-3xl" />
+      </div>
+      <div className="flex flex-col gap-5 rounded-3xl border border-slate-200/80 bg-gradient-to-br from-slate-900 via-cyan-950 to-slate-900 p-5 shadow-xl backdrop-blur-sm sm:p-6">
+        <div className="space-y-3">
+          <h2 className="text-2xl font-black tracking-tight text-white sm:text-3xl">إدارة المنتجات</h2>
+          <p className="max-w-2xl text-sm text-slate-200/90">واجهة إدارة أنعم وأسرع للمتابعة والتحكم بالمخزون.</p>
+          <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:max-w-2xl lg:grid-cols-4">
+            <div className="rounded-2xl border border-white/15 bg-white/10 px-3 py-2 backdrop-blur-sm">
+              <div className="text-[11px] text-slate-200/90">إجمالي المنتجات</div>
+              <div className="text-lg font-bold text-white">{products.length}</div>
+            </div>
+            <div className="rounded-2xl border border-white/15 bg-white/10 px-3 py-2 backdrop-blur-sm">
+              <div className="text-[11px] text-slate-200/90">النتائج المعروضة</div>
+              <div className="text-lg font-bold text-white">{filteredProducts.length}</div>
+            </div>
+            <div className="rounded-2xl border border-white/15 bg-white/10 px-3 py-2 backdrop-blur-sm">
+              <div className="text-[11px] text-slate-200/90">منخفض المخزون</div>
+              <div className="text-lg font-bold text-white">{lowStockProductsCount}</div>
+            </div>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={() => setShowHistoryModal(true)} variant="outline" className="gap-2 border-white/20 bg-white/10 text-white hover:bg-white/20 hover:text-white">
             <History className="w-4 h-4" />
             سجل الفواتير
           </Button>
-          <Button onClick={openNewPurchaseModal} variant="outline" className="gap-2 border-green-200 text-green-700 hover:bg-green-50">
+          <Button onClick={openNewPurchaseModal} variant="outline" className="gap-2 border-white/20 bg-white/10 text-white hover:bg-white/20 hover:text-white">
             <FilePlus className="w-4 h-4" />
             إدخال فاتورة شراء
           </Button>
           {(currentUser?.role === 'admin' || currentUser?.username === 'admin') && (
-            <Button onClick={handleImportLegacyDBF} variant="outline" className="gap-2 border-orange-200 text-orange-700 hover:bg-orange-50">
+            <Button onClick={handleImportLegacyDBF} variant="outline" className="gap-2 border-white/20 bg-white/10 text-white hover:bg-white/20 hover:text-white">
               <Database className="w-4 h-4" />
               استيراد قديم
             </Button>
           )}
-          <Button onClick={() => setShowRayanModal(true)} variant="outline" className="gap-2 border-blue-200 text-blue-700 hover:bg-blue-50">
+          <Button onClick={() => setShowRayanModal(true)} variant="outline" className="gap-2 border-white/20 bg-white/10 text-white hover:bg-white/20 hover:text-white">
             <FileText className="w-4 h-4" />
             جرد منتجات الريان
           </Button>
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
               <Button
-                className="bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600"
+                className="bg-gradient-to-r from-emerald-300 to-cyan-300 text-slate-900 shadow-lg shadow-cyan-900/25 hover:from-emerald-200 hover:to-cyan-200"
                 onClick={() => {
                   setEditingProduct(null);
                   resetForm();
@@ -700,7 +967,7 @@ const ProductManagement = ({ currentUser, purchaseMode = "units" }: { currentUse
                 إضافة منتج جديد
               </Button>
             </DialogTrigger>
-            <DialogContent className="sm:max-w-md" dir="rtl">
+            <DialogContent className="sm:max-w-md rounded-2xl border-slate-200/80 bg-white/95 backdrop-blur-xl" dir="rtl">
             <DialogHeader>
               <DialogTitle>{editingProduct ? "تعديل المنتج" : "إضافة منتج جديد"}</DialogTitle>
             </DialogHeader>
@@ -722,7 +989,16 @@ const ProductManagement = ({ currentUser, purchaseMode = "units" }: { currentUse
                 <Checkbox
                   id="isOffer"
                   checked={formData.isOffer}
-                  onCheckedChange={(checked) => setFormData({ ...formData, isOffer: Boolean(checked) })}
+                  onCheckedChange={(checked) => {
+                    const isOffer = Boolean(checked);
+                    setFormData({
+                      ...formData,
+                      isOffer,
+                      packageItems: isOffer && formData.packageItems.length === 0
+                        ? [{ productId: "", quantity: 1 }]
+                        : formData.packageItems,
+                    });
+                  }}
                 />
                 <label htmlFor="isOffer" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 text-blue-700">هل هذا المنتج عرض خاص؟</label>
               </div>
@@ -813,49 +1089,71 @@ const ProductManagement = ({ currentUser, purchaseMode = "units" }: { currentUse
                       required
                     />
                   </div>
-                  <div>
-                    <Label className="text-blue-800">المنتج الأساسي للعرض *</Label>
-                    <Popover open={offerProductSearchOpen} onOpenChange={setOfferProductSearchOpen}>
-                      <PopoverTrigger asChild>
-                        <Button variant="outline" role="combobox" className="w-full justify-between bg-white">
-                          {formData.offerUnderlyingProductId
-                            ? products.find((p) => String(p.id) === formData.offerUnderlyingProductId)?.name
-                            : "اختر المنتج..."}
-                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-[300px] p-0">
-                        <Command>
-                          <CommandInput placeholder="ابحث عن منتج..." onValueChange={setOfferProductSearchQuery} />
-                          <CommandList>
-                            <CommandEmpty>لا يوجد منتج.</CommandEmpty>
-                            <CommandGroup>
-                              {products.filter(p => !p.isOffer && p.name.toLowerCase().includes(offerProductSearchQuery.toLowerCase())).map((p) => (
-                                <CommandItem key={p.id} value={p.name} onSelect={() => {
-                                  setFormData({ ...formData, offerUnderlyingProductId: String(p.id) });
-                                  setOfferProductSearchOpen(false);
-                                }}>
-                                  {p.name}
-                                </CommandItem>
-                              ))}
-                            </CommandGroup>
-                          </CommandList>
-                        </Command>
-                      </PopoverContent>
-                    </Popover>
-                  </div>
-                  <div>
-                    <Label htmlFor="offer-qty" className="text-blue-800">الكمية في العرض *</Label>
-                    <Input
-                      id="offer-qty"
-                      type="number"
-                      min="1"
-                      value={formData.offerUnderlyingProductQuantity}
-                      onChange={(e) => setFormData({ ...formData, offerUnderlyingProductQuantity: e.target.value })}
-                      placeholder="عدد القطع في العرض"
-                      className="bg-white"
-                      required
-                    />
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <Label className="text-blue-800">مكونات البكج *</Label>
+                      <Button type="button" size="sm" variant="outline" onClick={addPackageItem} className="h-8 bg-white">
+                        <Plus className="w-4 h-4 ml-1" />
+                        إضافة منتج
+                      </Button>
+                    </div>
+                    <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+                      {formData.packageItems.map((packageItem, index) => (
+                        <div key={index} className="grid grid-cols-[1fr_90px_36px] items-end gap-2 rounded-lg border border-blue-100 bg-white p-2">
+                          <div>
+                            <Label className="mb-1 block text-xs text-blue-700">المنتج</Label>
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <Button variant="outline" role="combobox" className="w-full justify-between bg-white text-xs">
+                                  {packageItem.productId
+                                    ? products.find((p) => Number(p.id) === Number(packageItem.productId))?.name
+                                    : "اختر المنتج..."}
+                                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                </Button>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-[300px] p-0">
+                                <Command>
+                                  <CommandInput placeholder="ابحث عن منتج..." onValueChange={setOfferProductSearchQuery} />
+                                  <CommandList>
+                                    <CommandEmpty>لا يوجد منتج.</CommandEmpty>
+                                    <CommandGroup>
+                                      {products
+                                        .filter((p) => !p.isOffer && p.name.toLowerCase().includes(offerProductSearchQuery.toLowerCase()))
+                                        .map((p) => (
+                                          <CommandItem
+                                            key={p.id}
+                                            value={`${p.name}-${p.id}`}
+                                            onSelect={() => updatePackageItem(index, { productId: Number(p.id) })}
+                                          >
+                                            <div className="flex w-full items-center justify-between gap-2">
+                                              <span>{p.name}</span>
+                                              <span className="text-xs text-slate-500">المتوفر: {p.stock}</span>
+                                            </div>
+                                          </CommandItem>
+                                        ))}
+                                    </CommandGroup>
+                                  </CommandList>
+                                </Command>
+                              </PopoverContent>
+                            </Popover>
+                          </div>
+                          <div>
+                            <Label className="mb-1 block text-xs text-blue-700">الكمية</Label>
+                            <Input
+                              type="number"
+                              min="1"
+                              value={packageItem.quantity}
+                              onChange={(e) => updatePackageItem(index, { quantity: Number(e.target.value) || "" })}
+                              className="bg-white text-center"
+                              required
+                            />
+                          </div>
+                          <Button type="button" variant="ghost" size="icon" onClick={() => removePackageItem(index)} className="text-red-500 hover:bg-red-50">
+                            <X className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
               ) : (
@@ -868,14 +1166,14 @@ const ProductManagement = ({ currentUser, purchaseMode = "units" }: { currentUse
               {!formData.isOffer && (
               <div>
                 <Label htmlFor="barcode" className="text-right">
-                  الباركود
+                  {"\u0627\u0644\u0628\u0627\u0631\u0643\u0648\u062f"}
                 </Label>
                 <div className="flex gap-2">
                   <Input
                     id="barcode"
                     value={formData.barcode}
                     onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
-                    placeholder="أدخل أو امسح الباركود"
+                    placeholder={"\u0623\u062f\u062e\u0644 \u0628\u0627\u0631\u0643\u0648\u062f \u0648\u0627\u062d\u062f"}
                     className="flex-1"
                   />
                   <Button type="button" variant="outline" onClick={generateBarcode}>
@@ -983,127 +1281,246 @@ const ProductManagement = ({ currentUser, purchaseMode = "units" }: { currentUse
         </div>
       </div>
 
+      {smartShortageDraft && (
+        <Card className="border-amber-300/80 bg-gradient-to-l from-amber-50 to-orange-50 shadow-sm">
+          <CardContent className="pt-4">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+              <div>
+                <div className="font-semibold text-amber-900">قائمة شراء ذكية جاهزة</div>
+                <div className="text-sm text-amber-800">
+                  الفئة: {smartShortageDraft.categoryName || "كل الفئات"} | الأصناف: {smartShortageDraft.items.length}
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  onClick={() => applySmartShortageDraftToPurchase({ openModal: true, clearAfterApply: true })}
+                  className="bg-amber-600 hover:bg-amber-700 text-white"
+                >
+                  تحميلها في فاتورة شراء
+                </Button>
+                <Button
+                  variant="outline"
+                  className="border-amber-300 text-amber-800 hover:bg-amber-100"
+                  onClick={() => {
+                    if (smartShortageDraft.categoryName && smartShortageDraft.categoryName !== "كل الفئات") {
+                      setSearchTerm(smartShortageDraft.categoryName);
+                    }
+                  }}
+                >
+                  فلترة المنتجات حسب الفئة
+                </Button>
+                <Button variant="outline" onClick={() => clearSmartShortageDraft(true)}>
+                  مسح القائمة
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <CategoryManagement categories={categories} onCategoriesUpdate={handleCategoriesUpdate} />
 
-      <Card className="bg-white/60 backdrop-blur-sm border-blue-100">
+      <Card className="border-slate-200/80 bg-white/85 shadow-sm backdrop-blur-xl">
         <CardContent className="pt-6">
-          <div className="relative">
-            <Search className="absolute left-3 top-3 w-4 h-4 text-gray-400" />
-            <Input
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="ابحث عن المنتج أو التصنيف..."
-              className="pl-10 text-right"
-            />
+          <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-center">
+            <div className="relative">
+              <Search className="absolute right-3 top-3 w-4 h-4 text-slate-400" />
+              <Input
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="ابحث عن المنتج أو التصنيف..."
+                className="h-11 rounded-xl border-slate-200 bg-white pr-10 text-right shadow-sm transition-all duration-200 focus-visible:ring-cyan-300"
+              />
+            </div>
+            <div className="flex items-center gap-2 text-sm text-slate-600">
+              <Badge variant="secondary" className="rounded-full bg-cyan-100 px-3 py-1 text-cyan-800">
+                {filteredProducts.length}
+              </Badge>
+              <span>نتيجة</span>
+              {searchTerm && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-8 rounded-full px-3 text-slate-500 hover:text-slate-700"
+                  onClick={() => setSearchTerm("")}
+                >
+                  مسح
+                </Button>
+              )}
+            </div>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant={searchTerm === "" ? "default" : "outline"}
+              className={cn(
+                "h-8 rounded-full px-3 text-xs",
+                searchTerm === ""
+                  ? "bg-slate-900 text-white hover:bg-slate-800"
+                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+              )}
+              onClick={() => setSearchTerm("")}
+            >
+              كل المنتجات
+            </Button>
+            {categories.slice(0, 8).map((category) => (
+              <Button
+                key={category.id}
+                size="sm"
+                variant="outline"
+                className={cn(
+                  "h-8 rounded-full border-slate-200 bg-white px-3 text-xs text-slate-600 transition-all duration-200 hover:bg-slate-50",
+                  searchTerm === category.name && "font-semibold"
+                )}
+                style={searchTerm === category.name ? { borderColor: category.color, color: category.color } : undefined}
+                onClick={() => setSearchTerm(category.name)}
+              >
+                {category.name}
+              </Button>
+            ))}
           </div>
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-        {isLoading && (
-          <Card className="bg-white/80 backdrop-blur-sm border-blue-100">
-            <CardContent className="text-center py-12 text-gray-500">...يتم التحميل</CardContent>
-          </Card>
-        )}
-        {!isLoading &&
-          paginatedProducts.map((product) => (
-            <Card
-              key={product.id}
-              className="bg-white/80 backdrop-blur-sm border-blue-100 hover:shadow-lg transition-all duration-200"
-            >
-              <CardHeader className="pb-3">
-                <div className="flex justify-between items-start">
-                  <CardTitle className="text-lg text-gray-800">{product.name}</CardTitle>
-                  {product.categoryName && (
-                    <Badge
-                      variant="secondary"
-                      className="text-xs text-white border-0"
-                      style={{ backgroundColor: getCategoryColor(product.categoryName) }}
-                    >
-                      {product.categoryName}
-                    </Badge>
-                  )}
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-3 text-right">
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-gray-600">سعر بيع الوحدة:</span>
-                  <span className="font-bold text-blue-600">{formatCurrency(product.price)} د.ع</span>
-                </div>
-                {product.unitsPerBox ? (
-                  <div className="flex justify-between items-center text-sm text-gray-600">
-                    <span>عدد الوحدات في الصندوق:</span>
-                    <span>{product.unitsPerBox}</span>
-                  </div>
-                ) : null}
-                {product.boxSalePrice !== undefined ? (
-                  <div className="flex justify-between items-center text-sm text-gray-600">
-                    <span>سعر بيع الصندوق:</span>
-                    <span>{formatCurrency(product.boxSalePrice || 0)} د.ع</span>
-                  </div>
-                ) : null}
-                {product.boxPurchasePrice !== undefined ? (
-                  <div className="flex justify-between items-center text-sm text-gray-600">
-                    <span>سعر شراء الصندوق:</span>
-                    <span>{formatCurrency(product.boxPurchasePrice || 0)} د.ع</span>
-                  </div>
-                ) : null}
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-gray-600">المخزون:</span>
-                  <Badge variant={product.stock > 10 ? "default" : "destructive"}>{product.stock}</Badge>
-                </div>
-                {product.barcode && (
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-gray-600">الباركود:</span>
-                    <span className="text-xs font-mono bg-gray-100 px-2 py-1 rounded">{product.barcode}</span>
-                  </div>
-                )}
-                <div className="flex gap-2 pt-2">
-                  <Button size="sm" variant="outline" onClick={() => setHistoryProduct(product)} className="flex-1 border-purple-200 text-purple-600 hover:bg-purple-50">
-                    <History className="w-3 h-3 ml-1" />
-                    سجل
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={() => handleEdit(product)} className="flex-1">
-                    <Edit className="w-3 h-3 ml-1" />
-                    تعديل
-                  </Button>
-                  <Button size="sm" variant="destructive" onClick={() => handleDelete(product.id)}>
-                    <Trash2 className="w-3 h-3" />
-                  </Button>
-                </div>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {isLoading &&
+          Array.from({ length: 8 }).map((_, index) => (
+            <Card key={`product-skeleton-${index}`} className="border-slate-200/80 bg-white/85 backdrop-blur-sm">
+              <CardContent className="space-y-3 py-6">
+                <div className="h-5 w-2/3 animate-pulse rounded bg-slate-200" />
+                <div className="h-4 w-1/3 animate-pulse rounded bg-slate-200" />
+                <div className="h-12 animate-pulse rounded-xl bg-slate-100" />
+                <div className="h-12 animate-pulse rounded-xl bg-slate-100" />
+                <div className="h-9 animate-pulse rounded-lg bg-slate-200" />
               </CardContent>
             </Card>
           ))}
+        {!isLoading &&
+          paginatedProducts.map((product) => {
+            const isLowStock = Number(product.stock || 0) <= 10;
+
+            return (
+              <Card
+                key={product.id}
+                className="group overflow-hidden border border-slate-200/80 bg-white/90 shadow-sm backdrop-blur-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-cyan-100/70"
+              >
+                <CardHeader className="space-y-3 pb-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <CardTitle className="line-clamp-2 text-lg text-slate-800">{product.name}</CardTitle>
+                    {product.categoryName && (
+                      <Badge
+                        variant="outline"
+                        className="shrink-0 border-0 text-xs text-white"
+                        style={{ backgroundColor: getCategoryColor(product.categoryName) }}
+                      >
+                        {product.categoryName}
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between rounded-xl bg-slate-100/70 px-3 py-2">
+                    <span className="text-xs text-slate-500">المخزون الحالي</span>
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "rounded-full border px-2.5 py-0 text-xs",
+                        isLowStock
+                          ? "border-rose-300 bg-rose-50 text-rose-700"
+                          : "border-emerald-300 bg-emerald-50 text-emerald-700"
+                      )}
+                    >
+                      {product.stock}
+                    </Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-3 text-right">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="rounded-xl bg-slate-50 p-2">
+                      <div className="text-[11px] text-slate-500">سعر الوحدة</div>
+                      <div className="font-bold text-cyan-700">{formatCurrency(product.price)} د.ع</div>
+                    </div>
+                    <div className="rounded-xl bg-slate-50 p-2">
+                      <div className="text-[11px] text-slate-500">قيمة مخزون</div>
+                      <div className="font-bold text-slate-700">
+                        {formatCurrency(Number(product.stock || 0) * Number(product.price || 0))} د.ع
+                      </div>
+                    </div>
+                  </div>
+                  {product.unitsPerBox ? (
+                    <div className="flex justify-between items-center text-sm text-slate-600">
+                      <span>عدد الوحدات في الصندوق:</span>
+                      <span className="font-semibold">{product.unitsPerBox}</span>
+                    </div>
+                  ) : null}
+                  {product.boxSalePrice !== undefined ? (
+                    <div className="flex justify-between items-center text-sm text-slate-600">
+                      <span>سعر بيع الصندوق:</span>
+                      <span className="font-semibold">{formatCurrency(product.boxSalePrice || 0)} د.ع</span>
+                    </div>
+                  ) : null}
+                  {product.boxPurchasePrice !== undefined ? (
+                    <div className="flex justify-between items-center text-sm text-slate-600">
+                      <span>سعر شراء الصندوق:</span>
+                      <span className="font-semibold">{formatCurrency(product.boxPurchasePrice || 0)} د.ع</span>
+                    </div>
+                  ) : null}
+                  {product.barcode && (
+                    <div className="flex items-center justify-between gap-2 rounded-lg border border-dashed border-slate-200 bg-slate-50 px-2 py-1.5">
+                      <span className="text-xs text-slate-500">{"\u0627\u0644\u0628\u0627\u0631\u0643\u0648\u062f"}</span>
+                      <span className="max-w-[160px] truncate rounded bg-white px-2 py-0.5 text-xs font-mono text-slate-700">{product.barcode}</span>
+                    </div>
+                  )}
+                  <div className="flex gap-2 pt-2">
+                    <Button size="sm" variant="outline" onClick={() => setHistoryProduct(product)} className="flex-1 border-violet-200 bg-violet-50/80 text-violet-700 hover:bg-violet-100">
+                      <History className="w-3 h-3 ml-1" />
+                      سجل
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => handleEdit(product)} className="flex-1 border-cyan-200 bg-cyan-50/80 text-cyan-700 hover:bg-cyan-100">
+                      <Edit className="w-3 h-3 ml-1" />
+                      تعديل
+                    </Button>
+                    <Button size="sm" variant="destructive" className="bg-rose-600 hover:bg-rose-700" onClick={() => handleDelete(product.id)}>
+                      <Trash2 className="w-3 h-3" />
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
       </div>
 
       {/* Pagination Controls */}
       {!isLoading && filteredProducts.length > 0 && (
-        <div className="flex justify-center items-center gap-4 mt-6 dir-ltr">
-          <Button
-            variant="outline"
-            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-            disabled={currentPage === 1}
-          >
-            <ChevronLeft className="w-4 h-4" />
-          </Button>
-          <span className="text-sm font-medium">
-            صفحة {currentPage} من {totalPages}
-          </span>
-          <Button
-            variant="outline"
-            onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-            disabled={currentPage === totalPages}
-          >
-            <ChevronRight className="w-4 h-4" />
-          </Button>
+        <div className="mt-6 flex justify-center">
+          <div className="dir-ltr inline-flex items-center gap-4 rounded-2xl border border-slate-200/80 bg-white/90 px-4 py-2 shadow-sm backdrop-blur-sm">
+            <Button
+              variant="outline"
+              className="rounded-xl border-slate-200"
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </Button>
+            <span className="text-sm font-medium text-slate-700">
+              صفحة {currentPage} من {totalPages}
+            </span>
+            <Button
+              variant="outline"
+              className="rounded-xl border-slate-200"
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+            >
+              <ChevronRight className="w-4 h-4" />
+            </Button>
+          </div>
         </div>
       )}
 
       {!isLoading && filteredProducts.length === 0 && (
-        <Card className="bg-white/60 backdrop-blur-sm border-blue-100">
+        <Card className="border-dashed border-slate-300 bg-white/80 shadow-sm backdrop-blur-sm">
           <CardContent className="text-center py-12">
-            <Package className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-            <p className="text-gray-600">لا توجد منتجات مطابقة لبحثك.</p>
+            <Package className="mx-auto mb-4 h-12 w-12 text-slate-400" />
+            <p className="text-slate-600">لا توجد منتجات مطابقة لبحثك.</p>
+            <p className="mt-2 text-sm text-slate-500">جرّب كلمة بحث أخرى أو استخدم فلاتر التصنيف.</p>
           </CardContent>
         </Card>
       )}
@@ -1224,7 +1641,7 @@ const ProductManagement = ({ currentUser, purchaseMode = "units" }: { currentUse
                     </div>
                     {purchaseSearch && (
                         <div className="absolute w-full bg-white border shadow-lg rounded-md mt-1 max-h-48 overflow-y-auto z-50">
-                            {products.filter((p: any) => p.name.includes(purchaseSearch) || p.barcode?.includes(purchaseSearch)).map((p: any) => (
+                            {products.filter((p: any) => p.name.includes(purchaseSearch) || matchesBarcodeSearch(p, purchaseSearch)).map((p: any) => (
                                 <div 
                                     key={p.id} 
                                     className="p-2 hover:bg-gray-100 cursor-pointer text-sm flex justify-between"

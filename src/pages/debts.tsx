@@ -456,353 +456,466 @@ const DebtsPage: React.FC = () => {
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6 space-y-6">
       {/* الإحصائيات */}
       <div className="grid gap-4 md:grid-cols-3">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm text-muted-foreground">إجمالي الديون القائمة</CardTitle>
-            <Wallet className="w-5 h-5 text-primary" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{fmt(outstandingTotal)} د.ع</div>
-            <p className="text-xs text-muted-foreground">المبلغ الإجمالي غير المسدد</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm text-muted-foreground">الديون المفتوحة</CardTitle>
-            <TrendingDown className="w-5 h-5 text-primary" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{openCount}</div>
-            <p className="text-xs text-muted-foreground">عدد الديون غير المسددة بالكامل</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm text-muted-foreground">آخر دفعة</CardTitle>
-            <Clock3 className="w-5 h-5 text-primary" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
+        <div className="group relative overflow-hidden rounded-2xl bg-gradient-to-br from-blue-600/20 to-blue-500/10 border border-blue-500/20 p-6 backdrop-blur-xl transition-all duration-300 hover:border-blue-400/40 hover:from-blue-600/30 hover:to-blue-500/20">
+          <div className="absolute inset-0 bg-gradient-to-r from-blue-500/0 via-blue-500/10 to-blue-500/0 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+          <div className="relative flex flex-row items-center justify-between mb-3">
+            <h3 className="text-sm font-medium text-blue-100/70">إجمالي الديون القائمة</h3>
+            <div className="p-2 rounded-lg bg-blue-500/20 border border-blue-400/30">
+              <Wallet className="w-5 h-5 text-blue-300" />
+            </div>
+          </div>
+          <div className="relative">
+            <div className="text-3xl font-bold bg-gradient-to-r from-blue-200 to-blue-100 bg-clip-text text-transparent">{fmt(outstandingTotal)}</div>
+            <div className="text-blue-200/50 text-xs mt-1">د.ع المبلغ الإجمالي غير المسدد</div>
+          </div>
+        </div>
+
+        <div className="group relative overflow-hidden rounded-2xl bg-gradient-to-br from-red-600/20 to-red-500/10 border border-red-500/20 p-6 backdrop-blur-xl transition-all duration-300 hover:border-red-400/40 hover:from-red-600/30 hover:to-red-500/20">
+          <div className="absolute inset-0 bg-gradient-to-r from-red-500/0 via-red-500/10 to-red-500/0 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+          <div className="relative flex flex-row items-center justify-between mb-3">
+            <h3 className="text-sm font-medium text-red-100/70">الديون المفتوحة</h3>
+            <div className="p-2 rounded-lg bg-red-500/20 border border-red-400/30">
+              <TrendingDown className="w-5 h-5 text-red-300" />
+            </div>
+          </div>
+          <div className="relative">
+            <div className="text-3xl font-bold bg-gradient-to-r from-red-200 to-red-100 bg-clip-text text-transparent">{openCount}</div>
+            <div className="text-red-200/50 text-xs mt-1">عدد الديون غير المسددة بالكامل</div>
+          </div>
+        </div>
+
+        <div className="group relative overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-600/20 to-emerald-500/10 border border-emerald-500/20 p-6 backdrop-blur-xl transition-all duration-300 hover:border-emerald-400/40 hover:from-emerald-600/30 hover:to-emerald-500/20">
+          <div className="absolute inset-0 bg-gradient-to-r from-emerald-500/0 via-emerald-500/10 to-emerald-500/0 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+          <div className="relative flex flex-row items-center justify-between mb-3">
+            <h3 className="text-sm font-medium text-emerald-100/70">آخر دفعة</h3>
+            <div className="p-2 rounded-lg bg-emerald-500/20 border border-emerald-400/30">
+              <Clock3 className="w-5 h-5 text-emerald-300" />
+            </div>
+          </div>
+          <div className="relative">
+            <div className="text-3xl font-bold bg-gradient-to-r from-emerald-200 to-emerald-100 bg-clip-text text-transparent">
               {lastPaymentDate ? lastPaymentDate.toLocaleDateString("ar-IQ") : "لا يوجد"}
             </div>
-            <p className="text-xs text-muted-foreground">تاريخ آخر دفعة مسجلة</p>
-          </CardContent>
-        </Card>
+            <div className="text-emerald-200/50 text-xs mt-1">تاريخ آخر دفعة مسجلة</div>
+          </div>
+        </div>
       </div>
 
       {/* العملاء */}
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="text-lg">العملاء</CardTitle>
-          <div className="flex items-center gap-2">
-            <Input
-              placeholder="بحث عن عميل..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-56"
-            />
-            <Button size="sm" variant="secondary" onClick={handleTestPrint}>
-              طباعة اختبار
-            </Button>
-            <Button
-              size="sm"
+      <div className="rounded-2xl border border-slate-700/50 bg-gradient-to-br from-slate-800/50 to-slate-900/50 backdrop-blur-xl overflow-hidden">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between p-6 border-b border-slate-700/50">
+          <h2 className="text-xl font-bold bg-gradient-to-r from-slate-100 to-slate-300 bg-clip-text text-transparent">العملاء</h2>
+          <div className="flex flex-col gap-2 md:flex-row md:items-center">
+            <div className="relative">
+              <Input
+                placeholder="🔍 بحث عن عميل..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="bg-slate-700/40 border border-slate-600/50 rounded-lg text-slate-100 placeholder:text-slate-500 focus:border-blue-500/50 focus:bg-slate-700/60 transition-all w-full md:w-64"
+              />
+            </div>
+            <Button 
+              size="sm" 
               onClick={() => {
                 setShowCreateClient(true);
                 setNewClientName("");
                 setNewPhone("");
               }}
+              className="bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white border-0 rounded-lg transition-all duration-300"
             >
-              <Plus className="w-4 h-4 ml-1" />
+              <Plus className="w-4 h-4 ml-2" />
               إضافة عميل
             </Button>
           </div>
-        </CardHeader>
-        <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 p-6">
           {clients.map((c) => (
-            <Card key={`${c.id ?? "name"}-${c.name}`} className="border border-muted">
-              <CardContent className="pt-4 space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="font-semibold">{c.name}</div>
-                  <Badge variant="secondary">{fmt(c.total)} د.ع</Badge>
+            <div 
+              key={`${c.id ?? "name"}-${c.name}`} 
+              className="group relative overflow-hidden rounded-xl bg-gradient-to-br from-slate-700/40 to-slate-800/40 border border-slate-600/50 p-4 backdrop-blur-sm transition-all duration-300 hover:border-slate-500/80 hover:from-slate-700/60 hover:to-slate-800/60 hover:shadow-lg hover:shadow-blue-500/10 cursor-pointer"
+              onClick={() => openClientDetails(c)}
+            >
+              <div className="absolute inset-0 bg-gradient-to-r from-blue-500/0 via-blue-500/5 to-blue-500/0 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+              <div className="relative space-y-3">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <div className="font-semibold text-slate-100 text-lg">{c.name}</div>
+                    <div className="text-xs text-slate-400 mt-1">إجمالي الدين المتبقي</div>
+                  </div>
+                  <div className="px-3 py-1 rounded-lg bg-gradient-to-r from-blue-600/40 to-blue-500/40 border border-blue-400/50 text-blue-100 text-sm font-semibold whitespace-nowrap">
+                    {fmt(c.total)} د.ع
+                  </div>
                 </div>
-                <div className="text-xs text-muted-foreground">إجمالي الدين المتبقي</div>
-                <Button size="sm" variant="outline" className="w-full" onClick={() => openClientDetails(c)}>
-                  <Eye className="w-4 h-4 ml-1" />
+                <Button 
+                  size="sm" 
+                  className="w-full bg-blue-600/60 hover:bg-blue-600/80 text-blue-50 border border-blue-400/30 rounded-lg transition-all"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openClientDetails(c);
+                  }}
+                >
+                  <Eye className="w-4 h-4 ml-2" />
                   عرض التفاصيل
                 </Button>
-              </CardContent>
-            </Card>
+              </div>
+            </div>
           ))}
-          {clients.length === 0 && <div className="text-sm text-muted-foreground">لا يوجد عملاء لعرضهم.</div>}
-        </CardContent>
-      </Card>
+          {clients.length === 0 && (
+            <div className="col-span-full flex items-center justify-center py-12">
+              <div className="text-sm text-slate-400">لا يوجد عملاء لعرضهم.</div>
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* تفاصيل العميل */}
       {showDetails && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-60">
-          <Card className="w-full max-w-5xl max-h-[90vh] overflow-hidden">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="text-lg">تفاصيل العميل {selectedClientName ? `- ${selectedClientName}` : ""}</CardTitle>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-60 p-4">
+          <div className="w-full max-w-5xl max-h-[90vh] overflow-hidden rounded-2xl border border-slate-600/50 bg-gradient-to-br from-slate-800 to-slate-900 shadow-2xl shadow-black/50">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between p-6 border-b border-slate-700/50">
+              <h2 className="text-2xl font-bold bg-gradient-to-r from-slate-100 to-slate-300 bg-clip-text text-transparent">
+                تفاصيل العميل {selectedClientName ? `- ${selectedClientName}` : ""}
+              </h2>
               <div className="flex items-center gap-2">
                 {clientDebts.length === 0 && selectedClientId && (
                   <Button
                     size="sm"
-                    variant="destructive"
                     onClick={handleDeleteClient}
                     disabled={deleteClient.isPending}
+                    className="bg-red-600/60 hover:bg-red-600/80 text-red-50 border border-red-400/30 rounded-lg transition-all"
                   >
-                    <Trash2 className="w-4 h-4 ml-1" />
+                    <Trash2 className="w-4 h-4 ml-2" />
                     {deleteClient.isPending ? "جاري الحذف..." : "حذف العميل"}
                   </Button>
                 )}
-                <Button size="sm" variant="outline" onClick={() => {
-                  setEditClientName(selectedClientName);
-                  setShowEditClient(true);
-                }}>
-                  <Pencil className="w-4 h-4 ml-1" /> تعديل الاسم
-                </Button> 
-                <Button variant="ghost" size="icon" onClick={() => setShowDetails(false)}>
-                  <X className="w-4 h-4" />
+                <Button 
+                  size="sm" 
+                  onClick={() => {
+                    setEditClientName(selectedClientName);
+                    setShowEditClient(true);
+                  }}
+                  className="bg-slate-700/60 hover:bg-slate-700/80 text-slate-100 border border-slate-600/50 rounded-lg transition-all"
+                >
+                  <Pencil className="w-4 h-4 ml-2" /> 
+                  تعديل الاسم
+                </Button>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  onClick={() => setShowDetails(false)}
+                  className="text-slate-400 hover:bg-slate-700/50 rounded-lg transition-all"
+                >
+                  <X className="w-5 h-5" />
                 </Button>
               </div>
-            </CardHeader>
-            <CardContent className="space-y-4 overflow-y-auto max-h-[calc(90vh-150px)]">
-              <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                <div className="text-sm">
-                  العميل: {selectedClientName || "-"} {selectedClientId ? `| الرقم: ${selectedClientId}` : ""}
+            </div>
+            <div className="overflow-y-auto max-h-[calc(90vh-150px)] p-6 space-y-6">
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="px-4 py-3 rounded-lg bg-slate-700/40 border border-slate-600/50">
+                  <div className="text-xs text-slate-400 mb-1">العميل</div>
+                  <div className="text-lg font-semibold text-slate-100">{selectedClientName || "-"}</div>
+                  {selectedClientId && <div className="text-xs text-slate-500 mt-1">الرقم: {selectedClientId}</div>}
                 </div>
-                <div className="text-sm text-muted-foreground">
-                  إجمالي الدين المتبقي: {fmt(clientDebts.reduce((s, d) => s + remaining(d), 0))} د.ع
+                <div className="px-4 py-3 rounded-lg bg-gradient-to-r from-blue-600/20 to-blue-500/10 border border-blue-500/30">
+                  <div className="text-xs text-blue-300 mb-1">إجمالي الدين المتبقي</div>
+                  <div className="text-lg font-semibold text-blue-100">
+                    {fmt(clientDebts.reduce((s, d) => s + remaining(d), 0))} د.ع
+                  </div>
                 </div>
               </div>
 
-              <div className="grid gap-4 md:grid-cols-2">
+              <div className="grid gap-6 md:grid-cols-2">
                 {/* الديون */}
-                <div>
-                  <div className="font-semibold mb-2 flex items-center justify-between">
-                    <span>الديون</span>
-                    <Button size="sm" onClick={() => setShowAddDebt(true)}>
-                      إضافة دين
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-bold text-slate-100 text-lg">الديون</h3>
+                    <Button 
+                      size="sm" 
+                      onClick={() => setShowAddDebt(true)}
+                      className="bg-emerald-600/60 hover:bg-emerald-600/80 text-emerald-50 border border-emerald-400/30 rounded-lg transition-all text-xs"
+                    >
+                      <Plus className="w-3 h-3 ml-1" />
+                      إضافة
                     </Button>
                   </div>
-                  <div className="space-y-2">
-                    <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
-                      {sortedClientDebts.map((d) => (
-                        <Card key={d.id} className="border">
-                        <CardContent className="p-3 space-y-1">
+                  <div className="space-y-2 max-h-96 overflow-y-auto pr-2">
+                    {sortedClientDebts.map((d) => (
+                      <div key={d.id} className="group rounded-lg border border-slate-600/50 bg-gradient-to-br from-slate-700/40 to-slate-800/40 p-3 hover:border-slate-500/80 hover:from-slate-700/60 hover:to-slate-800/60 transition-all">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="font-semibold text-slate-100">{fmt(d.amount)} د.ع</div>
+                          <div className={`px-2 py-1 rounded text-xs font-medium ${
+                            remaining(d) === 0 
+                              ? "bg-emerald-600/40 text-emerald-100 border border-emerald-400/50" 
+                              : "bg-red-600/40 text-red-100 border border-red-400/50"
+                          }`}>
+                            {remaining(d) === 0 ? "✓ مسدد" : `${fmt(remaining(d))} متبقي`}
+                          </div>
+                        </div>
+                        <div className="text-xs text-slate-400 space-y-1">
+                          {d.reason && <div>السبب: {d.reason}</div>}
                           <div className="flex items-center justify-between">
-                            <div className="font-medium">المبلغ: {fmt(d.amount)} د.ع</div>
-                            <Badge variant={remaining(d) === 0 ? "secondary" : "outline"}>
-                              {remaining(d) === 0 ? "مسدد" : "غير مسدد"}
-                            </Badge>
+                            <div>الكاشير: {displayUser(d.createdBy)}</div>
+                            {d.createdAt && <div>{new Date(d.createdAt).toLocaleString("ar-IQ")}</div>}
                           </div>
-                          <div className="text-xs text-muted-foreground">السبب: {d.reason || "-"}</div>
-                          <div className="text-xs text-muted-foreground">
-                            الكاشير: {displayUser(d.createdBy)}{" "}
-                            {d.createdAt ? new Date(d.createdAt).toLocaleString("ar-IQ") : ""}
-                          </div>
-                          <div className="flex gap-2 pt-1">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => {
-                                setEditDebtId(d.id);
-                                setEditDebtAmount(String(d.amount));
-                                setEditDebtReason(d.reason || "");
-                                setEditDebtNote(d.note || "");
-                                setShowEditDebt(true);
-                              }}
-                            >
-                              تعديل
-                            </Button>
-                          </div>
-                        </CardContent>
-                      </Card>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="w-full mt-2 text-slate-300 hover:text-slate-100 hover:bg-slate-600/50"
+                          onClick={() => {
+                            setEditDebtId(d.id);
+                            setEditDebtAmount(String(d.amount));
+                            setEditDebtReason(d.reason || "");
+                            setEditDebtNote(d.note || "");
+                            setShowEditDebt(true);
+                          }}
+                        >
+                          <Pencil className="w-3 h-3 ml-2" />
+                          تعديل
+                        </Button>
+                      </div>
                     ))}
-                      {sortedClientDebts.length === 0 && (
-                        <div className="text-sm text-muted-foreground">لا توجد ديون مسجلة لهذا العميل.</div>
-                      )}
-                    </div>
+                    {sortedClientDebts.length === 0 && (
+                      <div className="flex items-center justify-center py-8 text-slate-400 text-sm">
+                        لا توجد ديون مسجلة لهذا العميل.
+                      </div>
+                    )}
                   </div>
                 </div>
 
                 {/* الدفعات */}
-                <div>
-                  <div className="font-semibold mb-2 flex items-center justify-between">
-                    <span>الدفعات</span>
-                    <Button size="sm" onClick={() => setShowAddPayment(true)} disabled={!selectedClientId}>
-                      إضافة دفعة
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-bold text-slate-100 text-lg">الدفعات</h3>
+                    <Button 
+                      size="sm" 
+                      onClick={() => setShowAddPayment(true)} 
+                      disabled={!selectedClientId}
+                      className="bg-emerald-600/60 hover:bg-emerald-600/80 text-emerald-50 border border-emerald-400/30 rounded-lg transition-all text-xs disabled:opacity-50"
+                    >
+                      <Plus className="w-3 h-3 ml-1" />
+                      إضافة
                     </Button>
                   </div>
-                  <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
+                  <div className="space-y-2 max-h-96 overflow-y-auto pr-2">
                     {allClientPayments.map((p) => (
-                        <Card key={p.id} className="border">
-                          <CardContent className="p-3 space-y-1">
-                            <div className="flex items-center justify-between">
-                              <div className="font-medium">{fmt(p.amount)} د.ع</div>
-                              <div className="text-xs text-muted-foreground">
-                                {p.createdAt ? new Date(p.createdAt).toLocaleString("ar-IQ") : ""}
-                              </div>
+                      <div key={p.id} className="group rounded-lg border border-slate-600/50 bg-gradient-to-br from-slate-700/40 to-slate-800/40 p-3 hover:border-slate-500/80 hover:from-slate-700/60 hover:to-slate-800/60 transition-all">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="font-semibold text-emerald-100">{fmt(p.amount)} د.ع</div>
+                          {p.createdAt && (
+                            <div className="text-xs text-slate-400">
+                              {new Date(p.createdAt).toLocaleString("ar-IQ")}
                             </div>
-                            <div className="text-xs text-muted-foreground">{p.note || "لا توجد ملاحظات"}</div>
-                            <div className="text-xs text-muted-foreground">الكاشير: {displayUser(p)}</div>
-                            <div className="flex gap-2 pt-1">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => {
-                                  setEditPaymentId(p.id);
-                                  setEditPaymentAmount(String(p.amount));
-                                  setEditPaymentNote(p.note || "");
-                                  setShowEditPayment(true);
-                                }}
-                              >
-                                تعديل
-                              </Button>
-                            </div>
-                          </CardContent>
-                        </Card>
-                      ))}
-                    {allClientPayments.length === 0 && <div className="text-sm text-muted-foreground">لا توجد دفعات.</div>}
+                          )}
+                        </div>
+                        <div className="text-xs text-slate-400 space-y-1">
+                          <div>{p.note || "لا توجد ملاحظات"}</div>
+                          <div>الكاشير: {displayUser(p)}</div>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="w-full mt-2 text-slate-300 hover:text-slate-100 hover:bg-slate-600/50"
+                          onClick={() => {
+                            setEditPaymentId(p.id);
+                            setEditPaymentAmount(String(p.amount));
+                            setEditPaymentNote(p.note || "");
+                            setShowEditPayment(true);
+                          }}
+                        >
+                          <Pencil className="w-3 h-3 ml-2" />
+                          تعديل
+                        </Button>
+                      </div>
+                    ))}
+                    {allClientPayments.length === 0 && (
+                      <div className="flex items-center justify-center py-8 text-slate-400 text-sm">
+                        لا توجد دفعات.
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         </div>
       )}
 
       {/* إضافة عميل جديد */}
       {showCreateClient && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-70">
-          <Card className="w-full max-w-md">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="text-base">إضافة عميل جديد</CardTitle>
-              <Button variant="ghost" size="icon" onClick={() => setShowCreateClient(false)}>
-                <X className="w-4 h-4" />
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-70 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-slate-600/50 bg-gradient-to-br from-slate-800 to-slate-900 shadow-2xl shadow-black/50">
+            <div className="flex items-center justify-between p-6 border-b border-slate-700/50">
+              <h2 className="text-lg font-bold text-slate-100">إضافة عميل جديد</h2>
+              <Button variant="ghost" size="icon" onClick={() => setShowCreateClient(false)} className="text-slate-400 hover:bg-slate-700/50">
+                <X className="w-5 h-5" />
               </Button>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <Input
-                autoFocus
-                placeholder="اسم العميل"
-                value={newClientName}
-                onChange={(e) => setNewClientName(e.target.value)}
-              />
-              <Input
-                placeholder="رقم الهاتف (اختياري)"
-                value={newPhone}
-                onChange={(e) => setNewPhone(e.target.value)}
-              />
-              {clientError && <div className="text-xs text-destructive">{clientError}</div>}
-              <Button className="w-full" onClick={handleCreateClient} disabled={createClient.isPending}>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-2">اسم العميل</label>
+                <Input
+                  autoFocus
+                  placeholder="أدخل اسم العميل"
+                  value={newClientName}
+                  onChange={(e) => setNewClientName(e.target.value)}
+                  className="bg-slate-700/40 border border-slate-600/50 rounded-lg text-slate-100 placeholder:text-slate-500 focus:border-blue-500/50 focus:bg-slate-700/60"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-2">رقم الهاتف (اختياري)</label>
+                <Input
+                  placeholder="أدخل رقم الهاتف"
+                  value={newPhone}
+                  onChange={(e) => setNewPhone(e.target.value)}
+                  className="bg-slate-700/40 border border-slate-600/50 rounded-lg text-slate-100 placeholder:text-slate-500 focus:border-blue-500/50 focus:bg-slate-700/60"
+                />
+              </div>
+              {clientError && <div className="text-xs text-red-400 bg-red-600/10 border border-red-500/30 rounded-lg p-2">{clientError}</div>}
+              <Button className="w-full bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white border-0 rounded-lg transition-all duration-300" onClick={handleCreateClient} disabled={createClient.isPending}>
                 {createClient.isPending ? "جاري الحفظ..." : "حفظ"}
               </Button>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         </div>
       )}
 
       {/* إضافة دين */}
       {showAddDebt && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-70">
-          <Card className="w-full max-w-md">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="text-base">إضافة دين</CardTitle>
-              <Button variant="ghost" size="icon" onClick={() => setShowAddDebt(false)}>
-                <X className="w-4 h-4" />
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-70 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-slate-600/50 bg-gradient-to-br from-slate-800 to-slate-900 shadow-2xl shadow-black/50">
+            <div className="flex items-center justify-between p-6 border-b border-slate-700/50">
+              <h2 className="text-lg font-bold text-slate-100">إضافة دين</h2>
+              <Button variant="ghost" size="icon" onClick={() => setShowAddDebt(false)} className="text-slate-400 hover:bg-slate-700/50">
+                <X className="w-5 h-5" />
               </Button>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <div className="text-sm text-muted-foreground">العميل: {selectedClientName || "-"}</div>
-              <Input
-                autoFocus
-                placeholder="المبلغ"
-                value={debtAmount}
-                onChange={(e) => setDebtAmount(e.target.value)}
-              />
-              <Input
-                placeholder="السبب (اختياري)"
-                value={debtReason}
-                onChange={(e) => setDebtReason(e.target.value)}
-              />
-              <Textarea
-                placeholder="ملاحظات (اختياري)"
-                value={debtNote}
-                onChange={(e) => setDebtNote(e.target.value)}
-              />
-              {debtError && <div className="text-xs text-destructive">{debtError}</div>}
-              <Button className="w-full" onClick={handleAddDebt} disabled={createDebt.isPending}>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="px-3 py-2 rounded-lg bg-blue-600/20 border border-blue-500/30 text-sm text-blue-200">
+                العميل: {selectedClientName || "-"}
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-2">المبلغ</label>
+                <Input
+                  autoFocus
+                  placeholder="أدخل المبلغ"
+                  value={debtAmount}
+                  onChange={(e) => setDebtAmount(e.target.value)}
+                  className="bg-slate-700/40 border border-slate-600/50 rounded-lg text-slate-100 placeholder:text-slate-500 focus:border-blue-500/50 focus:bg-slate-700/60"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-2">السبب (اختياري)</label>
+                <Input
+                  placeholder="أدخل السبب"
+                  value={debtReason}
+                  onChange={(e) => setDebtReason(e.target.value)}
+                  className="bg-slate-700/40 border border-slate-600/50 rounded-lg text-slate-100 placeholder:text-slate-500 focus:border-blue-500/50 focus:bg-slate-700/60"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-2">ملاحظات (اختياري)</label>
+                <Textarea
+                  placeholder="أدخل الملاحظات"
+                  value={debtNote}
+                  onChange={(e) => setDebtNote(e.target.value)}
+                  className="bg-slate-700/40 border border-slate-600/50 rounded-lg text-slate-100 placeholder:text-slate-500 focus:border-blue-500/50 focus:bg-slate-700/60 resize-none"
+                />
+              </div>
+              {debtError && <div className="text-xs text-red-400 bg-red-600/10 border border-red-500/30 rounded-lg p-2">{debtError}</div>}
+              <Button className="w-full bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white border-0 rounded-lg transition-all duration-300" onClick={handleAddDebt} disabled={createDebt.isPending}>
                 {createDebt.isPending ? "جاري الإضافة..." : "إضافة"}
               </Button>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         </div>
       )}
 
       {/* إضافة دفعة */}
       {showAddPayment && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-70">
-          <Card className="w-full max-w-md">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="text-base">إضافة دفعة</CardTitle>
-              <Button variant="ghost" size="icon" onClick={() => setShowAddPayment(false)}>
-                <X className="w-4 h-4" />
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-70 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-slate-600/50 bg-gradient-to-br from-slate-800 to-slate-900 shadow-2xl shadow-black/50">
+            <div className="flex items-center justify-between p-6 border-b border-slate-700/50">
+              <h2 className="text-lg font-bold text-slate-100">إضافة دفعة</h2>
+              <Button variant="ghost" size="icon" onClick={() => setShowAddPayment(false)} className="text-slate-400 hover:bg-slate-700/50">
+                <X className="w-5 h-5" />
               </Button>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <div className="text-sm text-muted-foreground">سيتم إضافة الدفعة لأول دين غير مسدد.</div>
-              <Input
-                autoFocus
-                placeholder="المبلغ"
-                value={payAmount}
-                onChange={(e) => setPayAmount(e.target.value)}
-              />
-              <Textarea
-                placeholder="ملاحظات (اختياري)"
-                value={payNote}
-                onChange={(e) => setPayNote(e.target.value)}
-              />
-              <Button className="w-full" onClick={handleAddPayment} disabled={!selectedClientId || addPayment.isPending}>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="px-3 py-2 rounded-lg bg-emerald-600/20 border border-emerald-500/30 text-sm text-emerald-200">
+                سيتم إضافة الدفعة لأول دين غير مسدد.
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-2">المبلغ</label>
+                <Input
+                  autoFocus
+                  placeholder="أدخل المبلغ"
+                  value={payAmount}
+                  onChange={(e) => setPayAmount(e.target.value)}
+                  className="bg-slate-700/40 border border-slate-600/50 rounded-lg text-slate-100 placeholder:text-slate-500 focus:border-blue-500/50 focus:bg-slate-700/60"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-2">ملاحظات (اختياري)</label>
+                <Textarea
+                  placeholder="أدخل الملاحظات"
+                  value={payNote}
+                  onChange={(e) => setPayNote(e.target.value)}
+                  className="bg-slate-700/40 border border-slate-600/50 rounded-lg text-slate-100 placeholder:text-slate-500 focus:border-blue-500/50 focus:bg-slate-700/60 resize-none"
+                />
+              </div>
+              <Button className="w-full bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-700 hover:to-emerald-600 text-white border-0 rounded-lg transition-all duration-300" onClick={handleAddPayment} disabled={!selectedClientId || addPayment.isPending}>
                 {addPayment.isPending ? "جاري الإضافة..." : "إضافة دفعة"}
               </Button>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         </div>
       )}
 
       {/* تعديل دين */}
       {showEditDebt && editDebtId != null && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-70">
-          <Card className="w-full max-w-md">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="text-base">تعديل دين</CardTitle>
-              <Button variant="ghost" size="icon" onClick={() => setShowEditDebt(false)}>
-                <X className="w-4 h-4" />
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-70 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-slate-600/50 bg-gradient-to-br from-slate-800 to-slate-900 shadow-2xl shadow-black/50">
+            <div className="flex items-center justify-between p-6 border-b border-slate-700/50">
+              <h2 className="text-lg font-bold text-slate-100">تعديل دين</h2>
+              <Button variant="ghost" size="icon" onClick={() => setShowEditDebt(false)} className="text-slate-400 hover:bg-slate-700/50">
+                <X className="w-5 h-5" />
               </Button>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <Input
-                autoFocus
-                placeholder="المبلغ"
-                value={editDebtAmount}
-                onChange={(e) => setEditDebtAmount(e.target.value)}
-              />
-              <Input
-                placeholder="السبب (اختياري)"
-                value={editDebtReason}
-                onChange={(e) => setEditDebtReason(e.target.value)}
-              />
-              <Textarea
-                placeholder="ملاحظات (اختياري)"
-                value={editDebtNote}
-                onChange={(e) => setEditDebtNote(e.target.value)}
-              />
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-2">المبلغ</label>
+                <Input
+                  autoFocus
+                  placeholder="أدخل المبلغ"
+                  value={editDebtAmount}
+                  onChange={(e) => setEditDebtAmount(e.target.value)}
+                  className="bg-slate-700/40 border border-slate-600/50 rounded-lg text-slate-100 placeholder:text-slate-500 focus:border-blue-500/50 focus:bg-slate-700/60"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-2">السبب (اختياري)</label>
+                <Input
+                  placeholder="أدخل السبب"
+                  value={editDebtReason}
+                  onChange={(e) => setEditDebtReason(e.target.value)}
+                  className="bg-slate-700/40 border border-slate-600/50 rounded-lg text-slate-100 placeholder:text-slate-500 focus:border-blue-500/50 focus:bg-slate-700/60"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-2">ملاحظات (اختياري)</label>
+                <Textarea
+                  placeholder="أدخل الملاحظات"
+                  value={editDebtNote}
+                  onChange={(e) => setEditDebtNote(e.target.value)}
+                  className="bg-slate-700/40 border border-slate-600/50 rounded-lg text-slate-100 placeholder:text-slate-500 focus:border-blue-500/50 focus:bg-slate-700/60 resize-none"
+                />
+              </div>
               <Button
-                className="w-full"
+                className="w-full bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white border-0 rounded-lg transition-all duration-300"
                 onClick={() => {
                   const amt = Number(editDebtAmount);
                   if (!amt || amt <= 0) {
@@ -820,35 +933,43 @@ const DebtsPage: React.FC = () => {
               >
                 {updateDebt.isPending ? "جاري التعديل..." : "تعديل"}
               </Button>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         </div>
       )}
 
       {/* تعديل دفعة */}
       {showEditPayment && editPaymentId != null && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-70">
-          <Card className="w-full max-w-md">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="text-base">تعديل دفعة</CardTitle>
-              <Button variant="ghost" size="icon" onClick={() => setShowEditPayment(false)}>
-                <X className="w-4 h-4" />
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-70 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-slate-600/50 bg-gradient-to-br from-slate-800 to-slate-900 shadow-2xl shadow-black/50">
+            <div className="flex items-center justify-between p-6 border-b border-slate-700/50">
+              <h2 className="text-lg font-bold text-slate-100">تعديل دفعة</h2>
+              <Button variant="ghost" size="icon" onClick={() => setShowEditPayment(false)} className="text-slate-400 hover:bg-slate-700/50">
+                <X className="w-5 h-5" />
               </Button>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <Input
-                autoFocus
-                placeholder="المبلغ"
-                value={editPaymentAmount}
-                onChange={(e) => setEditPaymentAmount(e.target.value)}
-              />
-              <Textarea
-                placeholder="ملاحظات (اختياري)"
-                value={editPaymentNote}
-                onChange={(e) => setEditPaymentNote(e.target.value)}
-              />
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-2">المبلغ</label>
+                <Input
+                  autoFocus
+                  placeholder="أدخل المبلغ"
+                  value={editPaymentAmount}
+                  onChange={(e) => setEditPaymentAmount(e.target.value)}
+                  className="bg-slate-700/40 border border-slate-600/50 rounded-lg text-slate-100 placeholder:text-slate-500 focus:border-blue-500/50 focus:bg-slate-700/60"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-2">ملاحظات (اختياري)</label>
+                <Textarea
+                  placeholder="أدخل الملاحظات"
+                  value={editPaymentNote}
+                  onChange={(e) => setEditPaymentNote(e.target.value)}
+                  className="bg-slate-700/40 border border-slate-600/50 rounded-lg text-slate-100 placeholder:text-slate-500 focus:border-blue-500/50 focus:bg-slate-700/60 resize-none"
+                />
+              </div>
               <Button
-                className="w-full"
+                className="w-full bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white border-0 rounded-lg transition-all duration-300"
                 onClick={() => {
                   const amt = Number(editPaymentAmount);
                   if (!amt || amt <= 0) {
@@ -865,30 +986,34 @@ const DebtsPage: React.FC = () => {
               >
                 {updatePayment.isPending ? "جاري التعديل..." : "تعديل الدفعة"}
               </Button>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         </div>
       )}
 
       {/* تعديل اسم العميل */}
       {showEditClient && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-70">
-          <Card className="w-full max-w-md">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="text-base">تعديل اسم العميل</CardTitle>
-              <Button variant="ghost" size="icon" onClick={() => setShowEditClient(false)}>
-                <X className="w-4 h-4" />
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-70 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-slate-600/50 bg-gradient-to-br from-slate-800 to-slate-900 shadow-2xl shadow-black/50">
+            <div className="flex items-center justify-between p-6 border-b border-slate-700/50">
+              <h2 className="text-lg font-bold text-slate-100">تعديل اسم العميل</h2>
+              <Button variant="ghost" size="icon" onClick={() => setShowEditClient(false)} className="text-slate-400 hover:bg-slate-700/50">
+                <X className="w-5 h-5" />
               </Button>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <Input
-                autoFocus
-                placeholder="اسم العميل"
-                value={editClientName}
-                onChange={(e) => setEditClientName(e.target.value)}
-              />
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-2">اسم العميل</label>
+                <Input
+                  autoFocus
+                  placeholder="أدخل اسم العميل"
+                  value={editClientName}
+                  onChange={(e) => setEditClientName(e.target.value)}
+                  className="bg-slate-700/40 border border-slate-600/50 rounded-lg text-slate-100 placeholder:text-slate-500 focus:border-blue-500/50 focus:bg-slate-700/60"
+                />
+              </div>
               <Button
-                className="w-full"
+                className="w-full bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white border-0 rounded-lg transition-all duration-300"
                 onClick={() => {
                   if (!editClientName.trim()) {
                     alert("الرجاء إدخال اسم العميل");
@@ -903,8 +1028,8 @@ const DebtsPage: React.FC = () => {
               >
                 {updateClient.isPending ? "جاري التعديل..." : "تعديل الاسم"}
               </Button>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         </div>
       )}
     </div>

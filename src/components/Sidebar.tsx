@@ -8,6 +8,9 @@ import {
   Receipt, 
   Users, 
   Activity, 
+  Tag, 
+  History,
+  Wallet,
   Utensils, 
   BookOpen, 
   Settings, 
@@ -16,7 +19,8 @@ import {
   Upload, 
   LogOut,
   Truck,
-  Archive
+  Archive,
+  Sparkles
 } from "lucide-react";
 import DailyNotes from "./DailyNotes";
 import { useToast } from "@/hooks/use-toast";
@@ -28,10 +32,14 @@ const navItems = [
   { to: "/invoices", text: "الفواتير", icon: Receipt, roles: ["admin", "cashier"] },
   { to: "/users", text: "الموظفين", icon: Users, roles: ["admin"] },
   { to: "/activity-log", text: "سجل النشاط", icon: Activity, roles: ["admin"] },
+  { to: "/pricing-logs", text: "سجل التسعيرات", icon: Tag, roles: ["admin"] },
+  { to: "/invoice-logs", text: "سجل التعديلات", icon: History, roles: ["admin"] },
+  { to: "/center-cashbox", text: "قاصة المركز", icon: Wallet, roles: ["admin", "cashier"] },
   { to: "/chicken-legs", text: "دجاج الأرجل", icon: Utensils, roles: ["admin", "cashier"] },
   { to: "/debts", text: "سجل الديون", icon: BookOpen, roles: ["admin", "cashier"] },
   { to: "/suppliers", text: "سجل الموردين", icon: Truck, roles: ["admin", "cashier"] },
   { to: "/archives", text: "الأرشيفات", icon: Archive, roles: ["admin"] },
+  { to: "/ai-chat", text: "الذكاء الاصطناعي", icon: Sparkles, roles: ["admin"] },
   { to: "/settings", text: "الإعدادات", icon: Settings, roles: ["admin"] },
 ];
 
@@ -48,6 +56,7 @@ const Sidebar = ({
 }) => {
   const isAdmin = currentUser?.role === "admin";
   const [backupMenuOpen, setBackupMenuOpen] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(true);
   const { toast } = useToast();
   const [clickCount, setClickCount] = useState(0);
   const [dailyStats, setDailyStats] = useState({ hours: 0, wage: 0 });
@@ -174,42 +183,63 @@ const Sidebar = ({
   };
 
   return (
-    <aside className="w-64 bg-white shadow-xl flex flex-col border-l border-slate-100 h-screen sticky top-0 font-sans">
+    <aside 
+      className={`bg-white shadow-xl flex flex-col border-l border-slate-100 h-screen sticky top-0 font-sans transition-all duration-300 ease-in-out overflow-hidden ${
+        isExpanded ? "w-64" : "w-24"
+      }`}
+      onMouseEnter={() => setIsExpanded(true)}
+      onMouseLeave={() => setIsExpanded(false)}
+    >
       {/* Header */}
-      <div className="p-6 bg-gradient-to-br from-blue-600 to-blue-800 text-white shadow-md">
-        <h2 className="text-2xl font-bold mb-1 tracking-tight">نقطة البيع</h2>
-        <div className="flex items-center gap-2 opacity-90 text-sm font-medium">
-          {/* الزر المخفي هنا: النقطة الخضراء */}
-          <div
-            className="w-2 h-2 bg-green-400 rounded-full animate-pulse shadow-[0_0_8px_rgba(74,222,128,0.5)] cursor-pointer hover:scale-150 transition-transform"
-            onClick={handleSecretClick}
-            title="Online"
-          />
-          {updateStatus?.available && (
-            <span className="text-[10px] bg-amber-500 text-white px-2 py-0.5 rounded-full">
-              تحديث متاح
-            </span>
-          )}
-          <div className="flex flex-col leading-tight">
-            <span>مرحباً, {currentUser.name || currentUser.username}</span>
-            {dailyWageEnabled && (
-              <span className="text-xs text-blue-100/90">
-                يومية اليوم: {formatWage(dailyStats.wage)} د.ع · {formatHours(dailyStats.hours)} ساعة
-              </span>
-            )}
+      <div className={`p-4 bg-gradient-to-br from-blue-600 to-blue-800 text-white shadow-md transition-all duration-300 ${isExpanded ? "p-6" : "p-4"}`}>
+        {isExpanded ? (
+          <>
+            <h2 className="text-2xl font-bold mb-1 tracking-tight">نقطة البيع</h2>
+            <div className="flex items-center gap-2 opacity-90 text-sm font-medium">
+              {/* الزر المخفي هنا: النقطة الخضراء */}
+              <div
+                className="w-2 h-2 bg-green-400 rounded-full animate-pulse shadow-[0_0_8px_rgba(74,222,128,0.5)] cursor-pointer hover:scale-150 transition-transform"
+                onClick={handleSecretClick}
+                title="Online"
+              />
+              {updateStatus?.available && (
+                <span className="text-[10px] bg-amber-500 text-white px-2 py-0.5 rounded-full">
+                  تحديث متاح
+                </span>
+              )}
+              <div className="flex flex-col leading-tight">
+                <span>مرحباً, {currentUser.name || currentUser.username}</span>
+                {dailyWageEnabled && (
+                  <span className="text-xs text-blue-100/90">
+                    يومية اليوم: {formatWage(dailyStats.wage)} د.ع · {formatHours(dailyStats.hours)} ساعة
+                  </span>
+                )}
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="flex justify-center">
+            <div
+              className="w-3 h-3 bg-green-400 rounded-full animate-pulse shadow-[0_0_8px_rgba(74,222,128,0.5)] cursor-pointer hover:scale-150 transition-transform"
+              onClick={handleSecretClick}
+              title="Online"
+            />
           </div>
-        </div>
+        )}
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 space-y-1 px-3 overflow-y-auto py-4 custom-scrollbar">
+      <nav className="flex-1 space-y-1 overflow-y-auto py-4 custom-scrollbar transition-all duration-300" style={{ paddingLeft: isExpanded ? "12px" : "6px", paddingRight: isExpanded ? "12px" : "6px" }}>
         {navItems.map((item) =>
           item.roles.includes(currentUser.role) ? (
             <NavLink
               key={item.to}
               to={item.to}
+              title={!isExpanded ? item.text : undefined}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 font-medium group ${
+                `flex items-center gap-3 transition-all duration-200 font-medium group rounded-xl ${
+                  isExpanded ? "px-4 py-3" : "px-3 py-3 justify-center"
+                } ${
                   isActive
                     ? "bg-blue-50 text-blue-700 shadow-sm translate-x-[-4px]"
                     : "text-slate-600 hover:bg-slate-50 hover:text-slate-900 hover:translate-x-[-2px]"
@@ -218,8 +248,8 @@ const Sidebar = ({
             >
               {({ isActive }) => (
                 <>
-                  <item.icon className={`w-5 h-5 transition-colors ${isActive ? "text-blue-600" : "text-slate-400 group-hover:text-slate-600"}`} />
-                  <span>{item.text}</span>
+                  <item.icon className={`w-5 h-5 shrink-0 transition-colors ${isActive ? "text-blue-600" : "text-slate-400 group-hover:text-slate-600"}`} />
+                  {isExpanded && <span className="whitespace-nowrap">{item.text}</span>}
                 </>
               )}
             </NavLink>
@@ -228,20 +258,22 @@ const Sidebar = ({
       </nav>
 
       {/* Footer Actions */}
-      <div className="p-3 border-t border-slate-100 bg-slate-50/50 space-y-2">
-        <DailyNotes currentUser={currentUser} />
+      <div className={`border-t border-slate-100 bg-slate-50/50 space-y-2 transition-all duration-300 ${isExpanded ? "p-3" : "p-2"}`}>
+        {isExpanded && <DailyNotes currentUser={currentUser} />}
         
         {isAdmin && (
           <div className="relative">
             <Button
               variant="ghost"
-              className="w-full justify-start gap-3 text-slate-700 hover:bg-white hover:shadow-sm border border-transparent hover:border-slate-200 transition-all"
+              title={!isExpanded ? "النسخ الاحتياطية" : undefined}
+              className={`w-full gap-3 text-slate-700 hover:bg-white hover:shadow-sm border border-transparent hover:border-slate-200 transition-all ${
+                isExpanded ? "justify-start" : "justify-center p-0"
+              }`}
               onClick={() => setBackupMenuOpen((v) => !v)}
             >
-              <Database className="w-5 h-5 text-indigo-500" />
-              <span>النسخ الاحتياطية</span>
+              <Database className="w-5 h-5 text-indigo-500 shrink-0" />
+              {isExpanded && <span>النسخ الاحتياطية</span>}
             </Button>
-            
             {backupMenuOpen && (
               <div className="absolute bottom-full left-0 w-full mb-2 bg-white border border-slate-200 shadow-xl rounded-xl overflow-hidden z-50 animate-in slide-in-from-bottom-2 fade-in duration-200">
                 <div className="p-2 space-y-1">
@@ -251,14 +283,14 @@ const Sidebar = ({
                   onClick={async () => {
                     setBackupMenuOpen(false);
                     try {
-                      const res = await window.api.backupAll({ actorRole: currentUser?.role });
-                      if (res?.ok) toast({ title: "تم الإنشاء", description: "تم إنشاء نسخة احتياطية كاملة." });
+                      const res = await window.api.backupCreate({ type: "all", actorRole: currentUser?.role });
+                      if (res?.ok) toast({ title: "تم الإنشاء", description: "تم إنشاء نسخة كاملة تشمل كل بيانات النظام." });
                     } catch (err: any) {
                       toast({ title: "خطأ", description: err?.message || "تعذر إنشاء النسخة الاحتياطية.", variant: "destructive" });
                     }
                   }}
                 >
-                  <Download className="w-4 h-4 text-blue-500" /> نسخة كاملة
+                  <Download className="w-4 h-4 text-blue-500" /> نسخة كاملة لكل البيانات
                 </button>
                 <button
                   className="w-full px-3 py-2 hover:bg-blue-50 text-slate-700 rounded-lg flex items-center gap-2 text-sm transition-colors"
@@ -266,7 +298,7 @@ const Sidebar = ({
                   onClick={async () => {
                     setBackupMenuOpen(false);
                     try {
-                      const res = await window.api.backupProducts({ actorRole: currentUser?.role });
+                      const res = await window.api.backupCreate({ type: "products", actorRole: currentUser?.role });
                       if (res?.ok) toast({ title: "تم الإنشاء", description: "تم حفظ نسخة احتياطية للمنتجات." });
                     } catch (err: any) {
                       toast({ title: "خطأ", description: err?.message || "تعذر إنشاء نسخة المنتجات.", variant: "destructive" });
@@ -281,7 +313,7 @@ const Sidebar = ({
                   onClick={async () => {
                     setBackupMenuOpen(false);
                     try {
-                      const res = await window.api.backupDebts({ actorRole: currentUser?.role });
+                      const res = await window.api.backupCreate({ type: "debts", actorRole: currentUser?.role });
                       if (res?.ok) toast({ title: "تم الإنشاء", description: "تم حفظ نسخة احتياطية للديون." });
                     } catch (err: any) {
                       toast({ title: "خطأ", description: err?.message || "تعذر إنشاء نسخة الديون.", variant: "destructive" });
@@ -317,12 +349,15 @@ const Sidebar = ({
         )}
 
         <Button 
-          variant="ghost" 
-          className="w-full justify-start gap-3 text-red-600 hover:bg-red-50 hover:text-red-700 border border-transparent hover:border-red-100 transition-all" 
+          variant="ghost"
+          title={!isExpanded ? "تسجيل الخروج" : undefined}
+          className={`w-full gap-3 text-red-600 hover:bg-red-50 hover:text-red-700 border border-transparent hover:border-red-100 transition-all ${
+            isExpanded ? "justify-start" : "justify-center p-0"
+          }`}
           onClick={onLogout}
         >
-          <LogOut className="w-5 h-5" />
-          <span>تسجيل الخروج</span>
+          <LogOut className="w-5 h-5 shrink-0" />
+          {isExpanded && <span>تسجيل الخروج</span>}
         </Button>
       </div>
     </aside>

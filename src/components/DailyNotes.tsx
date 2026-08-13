@@ -195,113 +195,178 @@ const DailyNotes = ({ currentUser }: { currentUser?: any }) => {
           <span>ملاحظات اليوم</span>
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto daily-notes-content" dir="rtl">
+      <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto daily-notes-content" dir="rtl">
         <DialogHeader>
           <DialogDescription className="sr-only">نافذة إدارة الملاحظات اليومية والمصاريف</DialogDescription>
-          <DialogTitle className="flex items-center gap-3 text-blue-800">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            ملاحظات اليوم (المخزون المالي الأساسي)
-            <Badge variant="secondary" className="bg-emerald-50 text-emerald-700 border-emerald-200">
-              دخل: {totalIn.toLocaleString()} دينار
-            </Badge>
-            <Badge variant="secondary" className="bg-rose-50 text-rose-700 border-rose-200">
-              خرج: {totalOut.toLocaleString()} دينار
-            </Badge>
-            <Badge variant="outline" className="text-blue-700 border-blue-200">
-              الصافي: {(totalIn - totalOut).toLocaleString()} دينار
-            </Badge>
-          </DialogTitle>
+          <div className="space-y-4 pb-2">
+            <DialogTitle className="text-2xl font-bold flex items-center gap-3 text-slate-900">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center">
+                <NotebookPen className="w-5 h-5 text-white" />
+              </div>
+              ملاحظات اليوم
+              <span className="text-xs font-normal text-slate-500 ml-2">(المخزون المالي الأساسي)</span>
+            </DialogTitle>
+
+            {/* ملخص الأرقام */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+              <div className="rounded-xl bg-gradient-to-br from-emerald-50 to-emerald-100/50 border border-emerald-200 p-4">
+                <div className="text-xs text-emerald-600 font-medium mb-1">💰 الدخل</div>
+                <div className="text-2xl font-bold text-emerald-700">{totalIn.toLocaleString()}</div>
+                <div className="text-[11px] text-emerald-600/70">دينار</div>
+              </div>
+              
+              <div className="rounded-xl bg-gradient-to-br from-rose-50 to-rose-100/50 border border-rose-200 p-4">
+                <div className="text-xs text-rose-600 font-medium mb-1">📤 الخرج</div>
+                <div className="text-2xl font-bold text-rose-700">{totalOut.toLocaleString()}</div>
+                <div className="text-[11px] text-rose-600/70">دينار</div>
+              </div>
+              
+              <div className="rounded-xl bg-gradient-to-br from-blue-50 to-blue-100/50 border border-blue-200 p-4">
+                <div className="text-xs text-blue-600 font-medium mb-1">⚖️ الصافي</div>
+                <div className={`text-2xl font-bold ${(totalIn - totalOut) >= 0 ? 'text-blue-700' : 'text-blue-700'}`}>
+                  {(totalIn - totalOut).toLocaleString()}
+                </div>
+                <div className="text-[11px] text-blue-600/70">دينار</div>
+              </div>
+
+              <div className="rounded-xl bg-gradient-to-br from-slate-50 to-slate-100/50 border border-slate-200 p-4">
+                <div className="text-xs text-slate-600 font-medium mb-1">📊 العدد</div>
+                <div className="text-2xl font-bold text-slate-700">{filteredEntries.length}</div>
+                <div className="text-[11px] text-slate-600/70">ملاحظة</div>
+              </div>
+            </div>
+          </div>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="space-y-4 border-t pt-4">
           <div className="flex flex-col md:flex-row gap-3 items-end">
             <div className="flex-1">
-              <Label className="text-sm">عرض ملاحظات تاريخ</Label>
+              <Label className="text-sm font-semibold">📅 عرض ملاحظات تاريخ</Label>
               <Input
                 type="date"
                 value={filterDate}
                 onChange={(e) => setFilterDate(e.target.value)}
+                className="rounded-lg border-slate-200"
               />
             </div>
           </div>
 
-          <Card className="bg-white/70 backdrop-blur-sm border-blue-100">
-            <CardContent className="pt-4">
+          <Card className="bg-gradient-to-br from-white to-slate-50/50 border-slate-200 shadow-sm">
+            <CardContent className="pt-6">
               <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
                 <div className="md:col-span-2">
-                  <Label className="text-sm">النوع</Label>
+                  <Label className="text-sm font-semibold mb-2 block">النوع</Label>
                   <div className="flex gap-2">
-                    <Button type="button" variant={type === "increase" ? "default" : "outline"} className="flex-1" onClick={() => setType("increase")}>
-                      زيادة
+                    <Button 
+                      type="button" 
+                      variant={type === "increase" ? "default" : "outline"} 
+                      className={`flex-1 ${type === "increase" ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white shadow-md' : 'border-slate-200'}`}
+                      onClick={() => setType("increase")}
+                    >
+                      ➕ زيادة
                     </Button>
-                    <Button type="button" variant={type === "decrease" ? "destructive" : "outline"} className="flex-1" onClick={() => setType("decrease")}>
-                      نقصان
+                    <Button 
+                      type="button" 
+                      variant={type === "decrease" ? "destructive" : "outline"} 
+                      className={`flex-1 ${type === "decrease" ? 'bg-gradient-to-r from-rose-500 to-rose-600 hover:from-rose-600 hover:to-rose-700 text-white shadow-md' : 'border-slate-200'}`}
+                      onClick={() => setType("decrease")}
+                    >
+                      ➖ نقصان
                     </Button>
                   </div>
                 </div>
                 <div className="md:col-span-2">
-                  <Label className="text-sm">المبلغ</Label>
+                  <Label className="text-sm font-semibold mb-2 block">المبلغ</Label>
                   <Input
                     type="number"
                     value={amount}
                     onChange={(e) => setAmount(e.target.value === "" ? "" : Number(e.target.value))}
                     placeholder="0"
                     min={0}
+                    className="rounded-lg border-slate-200 font-semibold"
                   />
                 </div>
                 <div className="md:col-span-7">
-                  <Label className="text-sm">ملاحظة</Label>
+                  <Label className="text-sm font-semibold mb-2 block">ملاحظة</Label>
                   <Input
                     value={noteText}
                     onChange={(e) => setNoteText(e.target.value)}
                     placeholder="مثال: سحب للمورد / إيداع من المبيعات ..."
+                    className="rounded-lg border-slate-200"
                   />
                 </div>
                 <div className="md:col-span-1">
                   {editingId ? (
                     <div className="flex gap-1">
-                      <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700" title="حفظ التعديل"><Edit className="w-4 h-4" /></Button>
-                      <Button type="button" variant="outline" onClick={cancelEdit} title="إلغاء"><X className="w-4 h-4" /></Button>
+                      <Button type="submit" className="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-md" title="حفظ التعديل">
+                        <Edit className="w-4 h-4" />
+                      </Button>
+                      <Button type="button" variant="outline" onClick={cancelEdit} title="إلغاء" className="border-slate-200">
+                        <X className="w-4 h-4" />
+                      </Button>
                     </div>
                   ) : (
-                    <Button type="submit" className="w-full">حفظ</Button>
+                    <Button type="submit" className="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-md">
+                      ✔️ حفظ
+                    </Button>
                   )}
                 </div>
               </form>
 
               {isLoading ? (
-                <div className="mt-4 text-center text-gray-500">جاري التحميل...</div>
+                <div className="mt-6 text-center py-8">
+                  <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-slate-200 border-t-blue-500 mb-2"></div>
+                  <div className="text-sm text-slate-500">جاري التحميل...</div>
+                </div>
               ) : filteredEntries.length > 0 ? (
-                <div className="mt-4 space-y-2">
-                  {filteredEntries.map((entry) => {
+                <div className="mt-6 space-y-2">
+                  {filteredEntries.map((entry, idx) => {
                     const { text: displayText, user: creator } = parseNote(entry.text);
+                    const isIncrease = entry.type === "increase";
                     return (
                     <div
                       key={entry.id}
-                      className="flex items-center justify-between p-3 rounded-lg border bg-blue-50 border-blue-100"
+                      className={`flex items-center justify-between p-4 rounded-xl border backdrop-blur-sm transition-all hover:shadow-md ${
+                        isIncrease
+                          ? 'bg-gradient-to-r from-emerald-50 to-emerald-100/50 border-emerald-200 hover:border-emerald-300'
+                          : 'bg-gradient-to-r from-rose-50 to-rose-100/50 border-rose-200 hover:border-rose-300'
+                      }`}
                     >
-                      <div className="flex items-center gap-3">
-                        <Badge
-                          variant="secondary"
-                          className={entry.type === "increase" ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-rose-100 text-rose-700 border-rose-200"}
-                        >
-                          {entry.type === "increase" ? "زيادة" : "نقصان"}
-                        </Badge>
-                        <div className="flex flex-col">
-                          <div className="text-sm text-gray-800">{displayText}</div>
-                          {creator && <div className="text-[10px] text-slate-400">كتبها: {creator.name}</div>}
+                      <div className="flex items-center gap-4 flex-1">
+                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center font-bold text-lg ${
+                          isIncrease
+                            ? 'bg-emerald-200/50 text-emerald-700'
+                            : 'bg-rose-200/50 text-rose-700'
+                        }`}>
+                          {isIncrease ? '📈' : '📉'}
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <div className="text-sm font-semibold text-slate-900">{displayText}</div>
+                          {creator && <div className="text-xs text-slate-500">👤 {creator.name}</div>}
                         </div>
                       </div>
                       <div className="flex items-center gap-4">
-                        <div className="text-sm font-semibold text-blue-800">
-                          {entry.amount.toLocaleString()} دينار
+                        <div className={`text-lg font-bold whitespace-nowrap ${
+                          isIncrease ? 'text-emerald-700' : 'text-rose-700'
+                        }`}>
+                          {isIncrease ? '+' : '−'} {entry.amount.toLocaleString()}
                         </div>
                         <div className="flex gap-1">
-                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleEdit(entry)}>
-                            <Edit className="w-4 h-4 text-blue-600" />
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className={`h-8 w-8 rounded-lg transition-all ${isIncrease ? 'hover:bg-emerald-200/50' : 'hover:bg-rose-200/50'}`}
+                            onClick={() => handleEdit(entry)}
+                          >
+                            <Edit className={`w-4 h-4 ${isIncrease ? 'text-emerald-600' : 'text-rose-600'}`} />
                           </Button>
-                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleDelete(entry)}>
-                            <Trash2 className="w-4 h-4 text-red-600" />
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className={`h-8 w-8 rounded-lg transition-all ${isIncrease ? 'hover:bg-emerald-200/50' : 'hover:bg-rose-200/50'}`}
+                            onClick={() => handleDelete(entry)}
+                          >
+                            <Trash2 className={`w-4 h-4 ${isIncrease ? 'text-emerald-600' : 'text-rose-600'}`} />
                           </Button>
                         </div>
                       </div>
@@ -309,7 +374,10 @@ const DailyNotes = ({ currentUser }: { currentUser?: any }) => {
                   )})}
                 </div>
               ) : (
-                <div className="mt-4 text-center text-gray-500">لا توجد ملاحظات لهذا التاريخ.</div>
+                <div className="mt-6 text-center py-12">
+                  <div className="text-3xl mb-2">📝</div>
+                  <div className="text-sm text-slate-500">لا توجد ملاحظات لهذا التاريخ</div>
+                </div>
               )}
             </CardContent>
           </Card>

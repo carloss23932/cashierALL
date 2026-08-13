@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis, LineChart, Line, Legend } from "recharts";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,7 +7,9 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatCurrency } from "@/lib/utils";
-import { Calendar, DollarSign, FileText, Package, ShoppingCart, TrendingUp, CreditCard, Download, Users, Loader2 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { Calendar, DollarSign, FileText, Package, ShoppingCart, TrendingUp, CreditCard, Download, Users, Loader2, Wallet } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 // دالة لتحويل التاريخ إلى توقيت بغداد (UTC+3) والحصول على التاريخ بصيغة YYYY-MM-DD
 const toBaghdadDateString = (dateInput: string | Date): string => {
@@ -18,29 +20,60 @@ const toBaghdadDateString = (dateInput: string | Date): string => {
   return date.toISOString().slice(0, 10);
 };
 
+const normalizeLookupText = (value: any) => String(value || "").trim().toLowerCase();
+
+const resolveUnitsPerBox = (...values: any[]) => {
+  for (const value of values) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return 1;
+};
+
+const resolveCapitalUnitCost = (product: any, purchaseStats?: { totalUnits: number; totalCost: number }) => {
+  const fallbackUnits = resolveUnitsPerBox(product?.unitsPerBox, 1);
+  const fallbackBoxCost = Number(product?.boxPurchasePrice || 0);
+  const fallbackUnitCost = fallbackBoxCost > 0 ? fallbackBoxCost / fallbackUnits : 0;
+
+  if (purchaseStats && purchaseStats.totalUnits > 0 && purchaseStats.totalCost > 0) {
+    return purchaseStats.totalCost / purchaseStats.totalUnits;
+  }
+
+  return fallbackUnitCost;
+};
+
 const ReportsSection = ({ currentUser }: { currentUser?: any }) => {
+  const { toast } = useToast();
+  const navigate = useNavigate();
   const [selectedReport, setSelectedReport] = useState("sales");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [reportTrigger, setReportTrigger] = useState(0);
   const [coverageDays, setCoverageDays] = useState(15); // عدد الأيام المراد تغطيتها بالشراء
+  const [shortageCategoryFilter, setShortageCategoryFilter] = useState("all");
 
   const [salesData, setSalesData] = useState<any[]>([]);
   const [productsData, setProductsData] = useState<any[]>([]);
+  const [categoriesData, setCategoriesData] = useState<any[]>([]);
+  const [purchaseInvoicesData, setPurchaseInvoicesData] = useState<any[]>([]);
   const [debtsData, setDebtsData] = useState<any[]>([]);
   const [returnsData, setReturnsData] = useState<any[]>([]);
   const [dailyNotesData, setDailyNotesData] = useState<any[]>([]);
+  const [cashboxEntriesData, setCashboxEntriesData] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
   const fetchData = async () => {
     setIsLoading(true);
     try {
-      const [sales, products, debts, returns, dailyNotes] = await Promise.all([
+      const [sales, products, categories, purchaseInvoices, debts, returns, dailyNotes, cashboxEntries] = await Promise.all([
         window.api.listSales({ limit: 100000 }), // جلب كافة الفواتير للتقارير لضمان دقة الحسابات
         window.api.listProducts(),
+        window.api.listCategories ? window.api.listCategories() : Promise.resolve([]),
+        window.api.listPurchaseInvoices ? window.api.listPurchaseInvoices({ limit: 100000 }) : Promise.resolve([]),
         typeof window.api.listDebts === 'function' ? window.api.listDebts({ limit: 100000 }) : Promise.resolve([]),
         window.api.listReturns ? window.api.listReturns({ limit: 100000 }) : Promise.resolve([]),
         window.api.listDailyNotes ? window.api.listDailyNotes({ limit: 100000 }) : Promise.resolve([]),
+        window.api.listCenterCashboxEntries ? window.api.listCenterCashboxEntries({ limit: 100000 }) : Promise.resolve([]),
       ]);
 
       const normalizedSales = (sales || []).map((s) => ({
@@ -49,6 +82,8 @@ const ReportsSection = ({ currentUser }: { currentUser?: any }) => {
       }));
       setSalesData(normalizedSales);
       setProductsData(products || []);
+      setCategoriesData(categories || []);
+      setPurchaseInvoicesData(purchaseInvoices || []);
       setDebtsData(
         (debts || []).map((d: any) => ({
           ...d,
@@ -65,6 +100,12 @@ const ReportsSection = ({ currentUser }: { currentUser?: any }) => {
         (dailyNotes || []).map((n: any) => ({
           ...n,
           noteDate: n?.noteDate ? String(n.noteDate) : null,
+        }))
+      );
+      setCashboxEntriesData(
+        (cashboxEntries || []).map((entry: any) => ({
+          ...entry,
+          createdAt: entry?.createdAt ? String(entry.createdAt) : null,
         }))
       );
     } catch (e) {
@@ -135,12 +176,67 @@ const ReportsSection = ({ currentUser }: { currentUser?: any }) => {
     return map;
   }, [dailyNotesData, dateFrom, dateTo, reportTrigger]);
 
+  const filteredCashboxEntries = useMemo(() => {
+    return (cashboxEntriesData || []).filter((entry) => {
+      if (!entry?.createdAt) return false;
+      const dateKey = toBaghdadDateString(entry.createdAt);
+      if (dateFrom && dateKey < dateFrom) return false;
+      if (dateTo && dateKey > dateTo) return false;
+      return true;
+    });
+  }, [cashboxEntriesData, dateFrom, dateTo, reportTrigger]);
+
+  const cashboxByDate = useMemo(() => {
+    const map = new Map<string, { deposits: number; withdrawals: number; drawerEffect: number }>();
+    (filteredCashboxEntries || []).forEach((entry) => {
+      const dateKey = toBaghdadDateString(entry.createdAt);
+      const row = map.get(dateKey) || { deposits: 0, withdrawals: 0, drawerEffect: 0 };
+      const amount = Number(entry.amount || 0);
+      if (!(amount > 0)) return;
+      if (entry.type === "withdrawal") {
+        row.withdrawals += amount;
+        row.drawerEffect += amount;
+      } else {
+        row.deposits += amount;
+        row.drawerEffect -= amount;
+      }
+      map.set(dateKey, row);
+    });
+    return map;
+  }, [filteredCashboxEntries, reportTrigger]);
+
+  const cashboxSummary = useMemo(() => {
+    return (filteredCashboxEntries || []).reduce((acc: any, entry: any) => {
+      const amount = Number(entry.amount || 0);
+      if (!(amount > 0)) return acc;
+      if (entry.type === "withdrawal") {
+        acc.withdrawals += amount;
+        acc.balance -= amount;
+        acc.drawerEffect += amount;
+      } else {
+        acc.deposits += amount;
+        acc.balance += amount;
+        acc.drawerEffect -= amount;
+      }
+      return acc;
+    }, { deposits: 0, withdrawals: 0, balance: 0, drawerEffect: 0 });
+  }, [filteredCashboxEntries, reportTrigger]);
+
+  const cashboxCurrentBalance = useMemo(() => {
+    return (cashboxEntriesData || []).reduce((acc: number, entry: any) => {
+      const amount = Number(entry.amount || 0);
+      if (!(amount > 0)) return acc;
+      return entry.type === "withdrawal" ? acc - amount : acc + amount;
+    }, 0);
+  }, [cashboxEntriesData, reportTrigger]);
+
   const salesReportData = useMemo(() => {
     const map = new Map<string, any>();
     const getRow = (dateKey: string) => map.get(dateKey) || {
       date: dateKey,
       invoices: 0,
       totalSales: 0,
+      cashReceived: 0,
       mastercardSales: 0,
       debtSales: 0,
       debtPayments: 0,
@@ -155,18 +251,19 @@ const ReportsSection = ({ currentUser }: { currentUser?: any }) => {
       const row = getRow(dateKey);
       const total = Number(s.total || 0);
       const remaining = Number(s.debtRemaining || 0);
-      const received = s.amountReceived !== undefined && s.amountReceived !== null
-        ? Number(s.amountReceived)
-        : Math.max(0, total - remaining);
+      const originalDebt = Number((s as any).debtOriginalAmount || 0);
+      const saleInitialReceived = originalDebt > 0 ? Math.max(0, total - originalDebt) : total;
+      const cashReceived = s.paymentMethod === "mastercard" ? 0 : saleInitialReceived;
       row.invoices += 1;
       row.totalSales += total;
-      row.received += received;
+      row.received += saleInitialReceived;
+      row.cashReceived += cashReceived;
       row.remaining += remaining;
       if (s.paymentMethod === 'mastercard') {
         row.mastercardSales += total;
       }
-      if (remaining > 0) {
-        row.debtSales += remaining;
+      if (originalDebt > 0) {
+        row.debtSales += originalDebt;
       } else if (s.paymentMethod === 'debt') {
         row.debtSales += total;
       }
@@ -187,14 +284,20 @@ const ReportsSection = ({ currentUser }: { currentUser?: any }) => {
       row.dailyNotes += Number(dnSum || 0);
       map.set(dateKey, row);
     }
+    for (const [dateKey, cashboxRow] of cashboxByDate.entries()) {
+      const row = getRow(dateKey);
+      row.cashboxDeposits = Number(cashboxRow.deposits || 0);
+      row.cashboxWithdrawals = Number(cashboxRow.withdrawals || 0);
+      row.cashboxEffect = Number(cashboxRow.drawerEffect || 0);
+      map.set(dateKey, row);
+    }
     return Array.from(map.values())
       .map((row: any) => ({
         ...row,
-        // تحسين: حساب الصافي النقدي الفعلي (استبعاد مبيعات البطاقة والديون من النقد في الصندوق)
-        total: (Number(row.totalSales || 0) - Number(row.mastercardSales || 0) - Number(row.debtSales || 0)) + Number(row.debtPayments || 0) + Number(row.dailyNotes || 0),
+        total: Number(row.cashReceived || 0) + Number(row.debtPayments || 0) + Number(row.dailyNotes || 0) + Number(row.cashboxEffect || 0) - Number(row.returns || 0),
       }))
       .sort((a: any, b: any) => a.date.localeCompare(b.date));
-  }, [filteredSales, paidDebtsByDate, returnsByDate, dailyNotesByDate, reportTrigger]);
+  }, [filteredSales, paidDebtsByDate, returnsByDate, dailyNotesByDate, cashboxByDate, reportTrigger]);
 
   const mastercardReport = useMemo(() => {
     if (!filteredSales) return { total: 0, commission: 0, count: 0 };
@@ -213,10 +316,9 @@ const ReportsSection = ({ currentUser }: { currentUser?: any }) => {
     return (filteredSales || []).reduce(
       (acc, sale) => {
         const total = Number(sale.total || 0);
+        const originalDebt = Number((sale as any).debtOriginalAmount || 0);
         const remaining = Number(sale.debtRemaining || 0);
-        const received = sale.amountReceived !== undefined && sale.amountReceived !== null
-          ? Number(sale.amountReceived)
-          : Math.max(0, total - remaining);
+        const received = originalDebt > 0 ? Math.max(0, total - originalDebt) : total;
         acc.received += received;
         acc.remaining += remaining;
         return acc;
@@ -246,24 +348,97 @@ const ReportsSection = ({ currentUser }: { currentUser?: any }) => {
       .slice(0, 20);
   }, [filteredSales, productsData, reportTrigger]);
 
+  const filteredPurchaseInvoices = useMemo(() => {
+    return (purchaseInvoicesData || []).filter((invoice: any) => {
+      const rawDate = invoice?.date || invoice?.timestamp || invoice?.createdAt;
+      if (!rawDate) return false;
+      const dateKey = toBaghdadDateString(rawDate);
+      if (dateFrom && dateKey < dateFrom) return false;
+      if (dateTo && dateKey > dateTo) return false;
+      return true;
+    });
+  }, [purchaseInvoicesData, dateFrom, dateTo, reportTrigger]);
+
   const purchaseReportData = useMemo(() => {
-    return salesReportData.map((r: any) => ({ date: r.date, invoices: r.invoices, items: 0, total: 0 }));
-  }, [salesReportData, reportTrigger]);
+    const map = new Map<string, any>();
+    for (const invoice of filteredPurchaseInvoices) {
+      const dateKey = toBaghdadDateString(invoice.date || invoice.timestamp || invoice.createdAt);
+      const row = map.get(dateKey) || { date: dateKey, invoices: 0, items: 0, total: 0 };
+      const items = invoice.items || [];
+      row.invoices += 1;
+      row.items += Number(invoice.itemsCount ?? items.length ?? 0);
+      row.total += Number(invoice.totalAmount || 0);
+      map.set(dateKey, row);
+    }
+    return Array.from(map.values()).sort((a: any, b: any) => a.date.localeCompare(b.date));
+  }, [filteredPurchaseInvoices, reportTrigger]);
 
   const purchasedItems = useMemo(() => {
-    return topSellingProducts.map((p: any) => ({ name: p.name, quantity: 0, cost: 0 }));
-  }, [topSellingProducts, reportTrigger]);
+    const map = new Map<string, { name: string; quantity: number; cost: number }>();
+    for (const invoice of filteredPurchaseInvoices) {
+      for (const item of invoice.items || []) {
+        const productId = item.productId !== undefined && item.productId !== null ? String(item.productId) : "";
+        const key = productId || normalizeLookupText(item.productName || item.name);
+        if (!key) continue;
+        const product = productId ? productsData.find((p: any) => String(p.id) === productId) : null;
+        const name = product?.name || item.productName || item.name || `#${productId}`;
+        const quantity = Number(item.quantity || 0);
+        const cost = Number(item.cost || 0) * quantity;
+        const current = map.get(key) || { name, quantity: 0, cost: 0 };
+        current.quantity += quantity;
+        current.cost += cost;
+        map.set(key, current);
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => b.cost - a.cost).slice(0, 100);
+  }, [filteredPurchaseInvoices, productsData, reportTrigger]);
+
+  const purchaseCostStatsMap = useMemo(() => {
+    const productsById = new Map((productsData || []).map((product: any) => [String(product.id), product]));
+    const productsByName = new Map(
+      (productsData || []).map((product: any) => [normalizeLookupText(product.name), product])
+    );
+    const statsMap = new Map<string, { totalUnits: number; totalCost: number }>();
+
+    (purchaseInvoicesData || []).forEach((invoice: any) => {
+      (invoice?.items || []).forEach((item: any) => {
+        const quantity = Number(item?.quantity ?? item?.qty ?? item?.count ?? 0);
+        if (!(quantity > 0)) return;
+
+        let product = null;
+        if (item?.productId !== undefined && item?.productId !== null && item?.productId !== "") {
+          product = productsById.get(String(item.productId)) || null;
+        }
+        if (!product) {
+          const lookupName = normalizeLookupText(item?.name ?? item?.productName ?? item?.product?.name);
+          if (lookupName) product = productsByName.get(lookupName) || null;
+        }
+        if (!product) return;
+
+        const unitsPerBox = resolveUnitsPerBox(item?.unitsPerBox, product?.unitsPerBox, 1);
+        const boxCost = Number(item?.cost ?? item?.purchasePrice ?? item?.price ?? item?.newCost ?? 0);
+        if (!(boxCost > 0)) return;
+
+        const unitCost = boxCost / unitsPerBox;
+        const key = String(product.id);
+        const current = statsMap.get(key) || { totalUnits: 0, totalCost: 0 };
+        current.totalUnits += quantity;
+        current.totalCost += unitCost * quantity;
+        statsMap.set(key, current);
+      });
+    });
+
+    return statsMap;
+  }, [productsData, purchaseInvoicesData, reportTrigger]);
 
   const productCostMap = useMemo(() => {
     const map = new Map<string, number>();
     (productsData || []).forEach((p: any) => {
-      const units = Number(p.unitsPerBox || 1) > 0 ? Number(p.unitsPerBox) : 1;
-      const boxCost = Number(p.boxPurchasePrice || 0);
-      const unitCost = boxCost > 0 ? boxCost / units : 0;
+      const unitCost = resolveCapitalUnitCost(p, purchaseCostStatsMap.get(String(p.id)));
       map.set(String(p.id), unitCost);
     });
     return map;
-  }, [productsData, reportTrigger]);
+  }, [productsData, purchaseCostStatsMap, reportTrigger]);
 
   const soldItems = useMemo(() => {
     return topSellingProducts.map((p: any) => {
@@ -291,10 +466,26 @@ const ReportsSection = ({ currentUser }: { currentUser?: any }) => {
       row.revenue = Math.max(0, row.revenue - saleDiscount);
       map.set(dateKey, row);
     }
+    for (const r of returnsData || []) {
+      if (!r?.createdAt) continue;
+      const dateKey = toBaghdadDateString(r.createdAt);
+      if (dateFrom && dateKey < dateFrom) continue;
+      if (dateTo && dateKey > dateTo) continue;
+      const row = map.get(dateKey) || { date: dateKey, revenue: 0, cost: 0 };
+      for (const it of r.items || []) {
+        const qty = Number(it.quantity || 0);
+        const price = Number(it.price || 0);
+        const pid = String(it.productId || it.product?.id || "");
+        const unitCost = productCostMap.get(pid) || 0;
+        row.revenue -= qty * price;
+        row.cost -= qty * unitCost;
+      }
+      map.set(dateKey, row);
+    }
     return Array.from(map.values())
       .map((r) => ({ ...r, profit: r.revenue - r.cost }))
       .sort((a, b) => a.date.localeCompare(b.date));
-  }, [filteredSales, productCostMap, reportTrigger]);
+  }, [filteredSales, returnsData, productCostMap, dateFrom, dateTo, reportTrigger]);
 
   const topDebtors = useMemo(() => {
     const map = new Map<string, number>();
@@ -323,9 +514,8 @@ const ReportsSection = ({ currentUser }: { currentUser?: any }) => {
       // تعديل: إظهار المنتجات ذات المخزون السالب لتنبيه المستخدم، مع تجاهل المنتجات ذات المخزون الصفري
       if (stock === 0) return null;
 
-      const units = Number(p.unitsPerBox || 1) || 1;
-      const boxCost = Number(p.boxPurchasePrice || 0);
-      const unitCost = boxCost > 0 ? boxCost / units : 0;
+      const units = resolveUnitsPerBox(p.unitsPerBox, 1);
+      const unitCost = resolveCapitalUnitCost(p, purchaseCostStatsMap.get(String(p.id)));
       const unitPrice = Number(p.price || 0);
 
       const itemCapital = stock * unitCost;
@@ -343,6 +533,7 @@ const ReportsSection = ({ currentUser }: { currentUser?: any }) => {
         id: p.id,
         name: p.name,
         stock,
+        unitsPerBox: units,
         unitCost,
         unitPrice,
         totalCapital: itemCapital,
@@ -358,13 +549,44 @@ const ReportsSection = ({ currentUser }: { currentUser?: any }) => {
       totalItems,
       details
     };
-  }, [productsData, reportTrigger]);
+  }, [productsData, purchaseCostStatsMap, reportTrigger]);
+
+  const shortageCategoryOptions = useMemo(() => {
+    const fromProducts = (productsData || [])
+      .filter((p: any) => p?.categoryName || p?.categoryId)
+      .map((p: any) => ({
+        id: p.categoryId !== undefined && p.categoryId !== null ? String(p.categoryId) : "",
+        name: String(p.categoryName || "غير مصنف"),
+      }));
+
+    const fromCategories = (categoriesData || []).map((c: any) => ({
+      id: String(c?.id ?? ""),
+      name: String(c?.name || ""),
+    }));
+
+    const merged = [...fromCategories, ...fromProducts]
+      .filter((c) => c.id && c.name)
+      .reduce((acc: Map<string, string>, cur) => {
+        if (!acc.has(cur.id)) acc.set(cur.id, cur.name);
+        return acc;
+      }, new Map<string, string>());
+
+    return Array.from(merged.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name, "ar"));
+  }, [productsData, categoriesData, reportTrigger]);
+
+  const selectedShortageCategoryName = useMemo(() => {
+    if (shortageCategoryFilter === "all") return "كل الفئات";
+    return shortageCategoryOptions.find((c) => c.id === shortageCategoryFilter)?.name || "فئة محددة";
+  }, [shortageCategoryFilter, shortageCategoryOptions]);
 
   // --- خوارزمية حساب النواقص الذكية ---
   const shortageReportData = useMemo(() => {
     // 1. تحديد فترة التحليل (إذا لم يحدد المستخدم تاريخ، نأخذ آخر 30 يوم افتراضياً لتحليل السحب)
     const endDate = dateTo ? new Date(dateTo) : new Date();
     const startDate = dateFrom ? new Date(dateFrom) : new Date(new Date().setDate(endDate.getDate() - 30));
+    const selectedCategoryId = shortageCategoryFilter === "all" ? null : String(shortageCategoryFilter);
     
     // حساب عدد أيام فترة التحليل بدقة
     const timeDiff = Math.abs(endDate.getTime() - startDate.getTime());
@@ -388,6 +610,11 @@ const ReportsSection = ({ currentUser }: { currentUser?: any }) => {
     const report = productsData.map((p: any) => {
       // استبعاد المنتجات ذات المخزون السالب من تقرير النواقص
       if ((p.stock || 0) < 0) return null;
+      const productCategoryId =
+        p.categoryId !== undefined && p.categoryId !== null && p.categoryId !== ""
+          ? String(p.categoryId)
+          : "";
+      if (selectedCategoryId !== null && productCategoryId !== selectedCategoryId) return null;
 
       const soldQty = salesMap.get(String(p.id)) || 0;
       const avgDailySales = soldQty / analysisDays; // معدل السحب اليومي
@@ -406,6 +633,8 @@ const ReportsSection = ({ currentUser }: { currentUser?: any }) => {
       return {
         id: p.id,
         name: p.name,
+        categoryId: p.categoryId,
+        categoryName: p.categoryName || "غير مصنف",
         currentStock: p.stock,
         avgDailySales: avgDailySales.toFixed(2),
         soldInPeriod: soldQty,
@@ -419,7 +648,51 @@ const ReportsSection = ({ currentUser }: { currentUser?: any }) => {
     // ترتيب حسب الأكثر احتياجاً (عدد الكراتين)
     return report.sort((a, b) => b.boxesToBuy - a.boxesToBuy);
 
-  }, [salesData, productsData, dateFrom, dateTo, coverageDays, reportTrigger]);
+  }, [salesData, productsData, dateFrom, dateTo, coverageDays, shortageCategoryFilter, reportTrigger]);
+
+  const shortageSummary = useMemo(() => {
+    return shortageReportData.reduce(
+      (acc, item: any) => {
+        acc.itemsCount += 1;
+        acc.totalUnits += Number(item.toBuyQty || 0);
+        acc.totalBoxes += Number(item.boxesToBuy || 0);
+        acc.totalCost += Number(item.costEstimate || 0);
+        return acc;
+      },
+      { itemsCount: 0, totalUnits: 0, totalBoxes: 0, totalCost: 0 }
+    );
+  }, [shortageReportData]);
+
+  const handleSendShortagesToProducts = () => {
+    if (!shortageReportData.length) {
+      toast({
+        title: "لا توجد نواقص",
+        description: "لا توجد عناصر لنقلها إلى صفحة المنتجات حالياً.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const payload = {
+      createdAt: new Date().toISOString(),
+      coverageDays,
+      categoryId: shortageCategoryFilter === "all" ? null : shortageCategoryFilter,
+      categoryName: selectedShortageCategoryName,
+      items: shortageReportData.map((item: any) => ({
+        id: item.id,
+        name: item.name,
+        toBuyQty: Number(item.toBuyQty || 0),
+        boxesToBuy: Number(item.boxesToBuy || 0),
+      })),
+    };
+
+    localStorage.setItem("smartShortageDraft", JSON.stringify(payload));
+    navigate("/products?smartShortages=1");
+    toast({
+      title: "تم نقل القائمة",
+      description: `تم تجهيز ${shortageReportData.length} صنف لصفحة المنتجات.`,
+    });
+  };
 
 
   const handleExportCSV = () => {
@@ -430,7 +703,7 @@ const ReportsSection = ({ currentUser }: { currentUser?: any }) => {
     if (selectedReport === "sales") {
         content = "التاريخ,عدد الفواتير,الواصل,الباقي,مبيعات البطاقة,المبيعات النقدية,تحصيل ديون,مرتجعات,ملاحظات,الصافي\n";
         content += salesReportData.map((r: any) =>
-            `${r.date},${r.invoices},${r.received},${r.remaining},${r.mastercardSales},${r.totalSales - r.mastercardSales - r.debtSales},${r.debtPayments},${r.returns},${r.dailyNotes},${r.total}`
+            `${r.date},${r.invoices},${r.received},${r.remaining},${r.mastercardSales},${r.cashReceived},${r.debtPayments},${r.returns},${r.dailyNotes},${r.total}`
         ).join("\n");
     } else if (selectedReport === "profits") {
         content = "التاريخ,الإيراد,التكلفة,الربح\n";
@@ -467,6 +740,111 @@ const ReportsSection = ({ currentUser }: { currentUser?: any }) => {
     link.href = URL.createObjectURL(blob);
     link.download = filename;
     link.click();
+  };
+
+  const handleExportInventoryPdf = async () => {
+    if (selectedReport !== "inventory-value") {
+      toast({ title: "تنبيه", description: "يرجى اختيار تقرير قيمة المخزون أولاً." });
+      return;
+    }
+
+    const escapeHtml = (value: any) =>
+      String(value ?? "").replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        "\"": "&quot;",
+        "'": "&#039;"
+      }[char] as string));
+
+    const formatNumber = (value: any) => {
+      const n = Number(value || 0);
+      if (Number.isNaN(n)) return "0";
+      return n.toLocaleString("ar-IQ");
+    };
+
+    try {
+      const storeName = await window.api.getAppSetting("storeName");
+      const generatedAt = new Date().toLocaleString("ar-IQ");
+      const rows = inventoryReportData.details.map((item: any, index: number) => `
+        <tr>
+          <td>${index + 1}</td>
+          <td>${escapeHtml(item.name)}</td>
+          <td>${formatNumber(item.stock)}</td>
+          <td>${formatNumber(item.unitsPerBox)}</td>
+          <td>${formatNumber(item.unitCost)}</td>
+          <td>${formatNumber(item.unitPrice)}</td>
+          <td>${formatNumber(item.totalCapital)}</td>
+          <td>${formatNumber(item.totalSaleValue)}</td>
+          <td>${formatNumber(item.profit)}</td>
+        </tr>
+      `).join("");
+
+      const html = `<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <title>تقرير رأس المال</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: Tahoma, Arial, sans-serif; margin: 24px; color: #0f172a; }
+    h1 { font-size: 20px; margin: 0 0 6px; }
+    .meta { font-size: 12px; color: #475569; margin-bottom: 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { border: 1px solid #e2e8f0; padding: 6px 8px; text-align: center; }
+    th { background: #f8fafc; font-weight: 700; }
+    tfoot td { background: #f1f5f9; font-weight: 700; }
+    thead { display: table-header-group; }
+    @page { size: A4; margin: 12mm; }
+  </style>
+</head>
+<body>
+  <h1>تقرير رأس المال (المخزون)</h1>
+  <div class="meta">المركز: ${escapeHtml(storeName || "المركز")} | التاريخ: ${escapeHtml(generatedAt)}</div>
+  <div class="meta">\u0637\u0631\u064a\u0642\u0629 \u0627\u0644\u0627\u062d\u062a\u0633\u0627\u0628: \u0645\u062a\u0648\u0633\u0637 \u062a\u0643\u0644\u0641\u0629 \u0627\u0644\u0634\u0631\u0627\u0621 \u0627\u0644\u0641\u0639\u0644\u064a \u0639\u0646\u062f \u062a\u0648\u0641\u0631 \u0641\u0648\u0627\u062a\u064a\u0631 \u0634\u0631\u0627\u0621\u060c \u0648\u0625\u0644\u0627 \u0622\u062e\u0631 \u062a\u0643\u0644\u0641\u0629 \u0634\u0631\u0627\u0621 \u0645\u062d\u0641\u0648\u0638\u0629 \u0639\u0644\u0649 \u0627\u0644\u0645\u0646\u062a\u062c.</div>
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>المنتج</th>
+        <th>الكمية</th>
+        <th>وحدة/كرتون</th>
+        <th>تكلفة الوحدة</th>
+        <th>سعر البيع</th>
+        <th>رأس المال</th>
+        <th>قيمة البيع</th>
+        <th>الربح</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rows || `<tr><td colspan="9">لا توجد بيانات</td></tr>`}
+    </tbody>
+    <tfoot>
+      <tr>
+        <td colspan="2">الإجمالي</td>
+        <td>${formatNumber(inventoryReportData.totalItems)}</td>
+        <td></td>
+        <td></td>
+        <td></td>
+        <td>${formatNumber(inventoryReportData.totalCapital)}</td>
+        <td>${formatNumber(inventoryReportData.totalSalesValue)}</td>
+        <td>${formatNumber(inventoryReportData.totalProfit)}</td>
+      </tr>
+    </tfoot>
+  </table>
+</body>
+</html>`;
+
+      const fileName = `capital-report-${new Date().toISOString().slice(0, 10)}.pdf`;
+      const res = await window.api.exportReportPdf({ html, fileName });
+      if (res?.ok) {
+        toast({ title: "تم التصدير", description: "تم حفظ التقرير بصيغة PDF." });
+      } else if (!res?.canceled) {
+        toast({ title: "فشل التصدير", description: res?.error || "تعذر إنشاء ملف PDF.", variant: "destructive" });
+      }
+    } catch (e: any) {
+      toast({ title: "فشل التصدير", description: e?.message || "تعذر إنشاء ملف PDF.", variant: "destructive" });
+    }
   };
 
   const handlePrintShortages = async () => {
@@ -512,7 +890,7 @@ const ReportsSection = ({ currentUser }: { currentUser?: any }) => {
                 </CardTitle>
               </CardHeader>
               <CardContent className="pt-2">
-                <div className="mb-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className={`mb-6 grid grid-cols-1 gap-4 ${currentUser?.role === "admin" ? "md:grid-cols-4" : "md:grid-cols-3"}`}>
                   <Card>
                     <CardHeader className="flex flex-row items-center justify-between pb-2">
                       <CardTitle className="text-sm font-medium">مبيعات البطاقة</CardTitle>
@@ -543,6 +921,18 @@ const ReportsSection = ({ currentUser }: { currentUser?: any }) => {
                       <p className="text-xs text-muted-foreground">ديون متبقية</p>
                     </CardContent>
                   </Card>
+                  {currentUser?.role === "admin" && (
+                    <Card>
+                      <CardHeader className="flex flex-row items-center justify-between pb-2">
+                        <CardTitle className="text-sm font-medium">رصيد قاصة المركز</CardTitle>
+                        <Wallet className="w-4 h-4 text-muted-foreground" />
+                      </CardHeader>
+                      <CardContent>
+                        <div className="text-2xl font-bold text-amber-700">{formatCurrency(cashboxCurrentBalance)} د.ع</div>
+                        <p className="text-xs text-muted-foreground">الأثر على الصندوق خلال الفترة: {formatCurrency(cashboxSummary.drawerEffect)} د.ع</p>
+                      </CardContent>
+                    </Card>
+                  )}
                 </div>
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   <div className="space-y-4">
@@ -554,6 +944,10 @@ const ReportsSection = ({ currentUser }: { currentUser?: any }) => {
                           <TableHead className="text-right">الواصل</TableHead>
                           <TableHead className="text-right">الباقي</TableHead>
                           <TableHead className="text-right">مبيعات البطاقة</TableHead>
+                          <TableHead className="text-right">نقد البيع</TableHead>
+                          <TableHead className="text-right">تحصيل ديون</TableHead>
+                          <TableHead className="text-right">مرتجعات</TableHead>
+                          <TableHead className="text-right">القاصة</TableHead>
                           <TableHead className="text-right">الصافي النقدي (في الصندوق)</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -565,6 +959,12 @@ const ReportsSection = ({ currentUser }: { currentUser?: any }) => {
                             <TableCell className="text-emerald-600">{item.received > 0 ? `${formatCurrency(item.received)} د.ع` : "-"}</TableCell>
                             <TableCell className="text-red-600">{item.remaining > 0 ? `${formatCurrency(item.remaining)} د.ع` : "-"}</TableCell>
                             <TableCell className="text-green-600">{item.mastercardSales > 0 ? `${formatCurrency(item.mastercardSales)} د.ع` : "-"}</TableCell>
+                            <TableCell className="text-emerald-700">{item.cashReceived > 0 ? `${formatCurrency(item.cashReceived)} د.ع` : "-"}</TableCell>
+                            <TableCell className="text-blue-600">{item.debtPayments > 0 ? `${formatCurrency(item.debtPayments)} د.ع` : "-"}</TableCell>
+                            <TableCell className="text-red-600">{item.returns > 0 ? `${formatCurrency(item.returns)} د.ع` : "-"}</TableCell>
+                            <TableCell className={Number(item.cashboxEffect || 0) < 0 ? "text-red-600" : "text-emerald-600"}>
+                              {Number(item.cashboxEffect || 0) !== 0 ? `${formatCurrency(item.cashboxEffect)} د.ع` : "-"}
+                            </TableCell>
                             <TableCell className="font-semibold text-blue-600">
                               {formatCurrency(item.total)} د.ع
                             </TableCell>
@@ -596,7 +996,7 @@ const ReportsSection = ({ currentUser }: { currentUser?: any }) => {
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-blue-800">
                 <ShoppingCart className="w-5 h-5" />
-                المشتريات (غير مفعلة حالياً)
+                المشتريات اليومية
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -711,7 +1111,7 @@ const ReportsSection = ({ currentUser }: { currentUser?: any }) => {
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-blue-800">
                 <Package className="w-5 h-5" />
-                الأصناف المشتراة (عرض تجريبي)
+                الأصناف المشتراة
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -833,6 +1233,10 @@ const ReportsSection = ({ currentUser }: { currentUser?: any }) => {
               </Card>
             </div>
 
+            <div className="rounded-lg border border-blue-100 bg-blue-50/70 px-4 py-3 text-sm text-blue-900">
+              طريقة الاحتساب: يتم اعتماد متوسط تكلفة الشراء الفعلي من فواتير الشراء عند توفرها، وإلا يتم استخدام آخر تكلفة شراء محفوظة على المنتج.
+            </div>
+
             <Card className="bg-white/80 backdrop-blur-sm border-blue-100">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-blue-800">
@@ -888,12 +1292,60 @@ const ReportsSection = ({ currentUser }: { currentUser?: any }) => {
                   min={1}
                 />
               </div>
+              <div className="space-y-2 w-full md:w-56">
+                <Label className="text-blue-800">فلترة حسب الفئة</Label>
+                <Select value={shortageCategoryFilter} onValueChange={setShortageCategoryFilter}>
+                  <SelectTrigger className="bg-white">
+                    <SelectValue placeholder="كل الفئات" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">كل الفئات</SelectItem>
+                    {shortageCategoryOptions.map((category) => (
+                      <SelectItem key={category.id} value={category.id}>
+                        {category.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="text-sm text-slate-500">
                 * يتم حساب الاحتياج بناءً على معدل السحب في الفترة المحددة في الفلتر أعلاه (أو آخر 30 يوم).
               </div>
-              <Button onClick={handlePrintShortages} className="bg-slate-800 text-white gap-2">
-                <FileText className="w-4 h-4" /> طباعة قائمة الشراء
-              </Button>
+              <div className="flex flex-wrap gap-2 w-full md:w-auto">
+                <Button onClick={handleSendShortagesToProducts} className="bg-blue-600 hover:bg-blue-700 text-white gap-2" disabled={shortageReportData.length === 0}>
+                  <ShoppingCart className="w-4 h-4" /> نقل إلى صفحة المنتجات
+                </Button>
+                <Button onClick={handlePrintShortages} className="bg-slate-800 text-white gap-2">
+                  <FileText className="w-4 h-4" /> طباعة قائمة الشراء
+                </Button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+              <Card className="border-blue-100 bg-blue-50">
+                <CardContent className="p-4 text-center">
+                  <div className="text-xs text-blue-700">عدد الأصناف الناقصة</div>
+                  <div className="text-2xl font-bold text-blue-900">{shortageSummary.itemsCount}</div>
+                </CardContent>
+              </Card>
+              <Card className="border-amber-100 bg-amber-50">
+                <CardContent className="p-4 text-center">
+                  <div className="text-xs text-amber-700">الكراتين المطلوبة</div>
+                  <div className="text-2xl font-bold text-amber-900">{shortageSummary.totalBoxes}</div>
+                </CardContent>
+              </Card>
+              <Card className="border-purple-100 bg-purple-50">
+                <CardContent className="p-4 text-center">
+                  <div className="text-xs text-purple-700">القطع المطلوبة</div>
+                  <div className="text-2xl font-bold text-purple-900">{shortageSummary.totalUnits}</div>
+                </CardContent>
+              </Card>
+              <Card className="border-emerald-100 bg-emerald-50">
+                <CardContent className="p-4 text-center">
+                  <div className="text-xs text-emerald-700">تقدير تكلفة الشراء</div>
+                  <div className="text-xl font-bold text-emerald-900">{formatCurrency(shortageSummary.totalCost)} د.ع</div>
+                </CardContent>
+              </Card>
             </div>
 
             <Card className="bg-white/80 backdrop-blur-sm border-blue-100">
@@ -908,6 +1360,7 @@ const ReportsSection = ({ currentUser }: { currentUser?: any }) => {
                   <TableHeader>
                     <TableRow>
                       <TableHead className="text-right">المنتج</TableHead>
+                      <TableHead className="text-right">الفئة</TableHead>
                       <TableHead className="text-center">المخزون الحالي</TableHead>
                       <TableHead className="text-center">معدل السحب اليومي</TableHead>
                       <TableHead className="text-center bg-blue-50 text-blue-800 font-bold">الكراتين المطلوبة</TableHead>
@@ -921,6 +1374,7 @@ const ReportsSection = ({ currentUser }: { currentUser?: any }) => {
                         className={item.currentStock < 0 ? "bg-red-100 hover:bg-red-200/50" : ""}
                       >
                         <TableCell className="font-medium">{item.name}</TableCell>
+                        <TableCell>{item.categoryName || "غير مصنف"}</TableCell>
                         <TableCell className={`text-center font-bold ${item.currentStock < 0 ? "text-red-600" : "text-slate-500"}`}>
                           {item.currentStock}
                         </TableCell>
@@ -931,8 +1385,8 @@ const ReportsSection = ({ currentUser }: { currentUser?: any }) => {
                     ))}
                     {shortageReportData.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={5} className="text-center py-8 text-slate-500">
-                          ممتاز! المخزون كافٍ لتغطية {coverageDays} يوم بناءً على معدل السحب الحالي.
+                        <TableCell colSpan={6} className="text-center py-8 text-slate-500">
+                          ممتاز! لا توجد نواقص ضمن ({selectedShortageCategoryName}) لفترة {coverageDays} يوم.
                         </TableCell>
                       </TableRow>
                     )}
@@ -983,9 +1437,7 @@ const ReportsSection = ({ currentUser }: { currentUser?: any }) => {
                   {(currentUser?.role === 'admin' || currentUser?.username === 'admin') && (
                     <SelectItem value="inventory-value">قيمة المخزون (رأس المال)</SelectItem>
                   )}
-                  {(currentUser?.role === 'admin' || currentUser?.username === 'admin') && (
-                    <SelectItem value="shortages">النواقص (قائمة الشراء الذكية)</SelectItem>
-                  )}
+                  <SelectItem value="shortages">النواقص (قائمة الشراء الذكية)</SelectItem>
                   <SelectItem value="top-selling">الأكثر مبيعاً</SelectItem>
                   <SelectItem value="purchased-items">الأصناف المشتراة</SelectItem>
                   <SelectItem value="sold-items">الأصناف المباعة</SelectItem>
@@ -1013,6 +1465,15 @@ const ReportsSection = ({ currentUser }: { currentUser?: any }) => {
               <Button onClick={handleExportCSV} variant="outline" className="w-full mt-2 border-green-200 text-green-700 hover:bg-green-50">
                 <Download className="w-4 h-4 ml-2" />
                 تصدير Excel
+              </Button>
+              <Button
+                onClick={handleExportInventoryPdf}
+                variant="outline"
+                className="w-full mt-2 border-amber-200 text-amber-700 hover:bg-amber-50"
+                disabled={selectedReport !== "inventory-value"}
+              >
+                <FileText className="w-4 h-4 ml-2" />
+                تصدير PDF (رأس المال)
               </Button>
             </div>
           </div>

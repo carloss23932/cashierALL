@@ -1,6 +1,6 @@
 appId: com.cro.p
-productName: "مركز الجمجمة"
-# icon: electron/icons/chicken.png
+productName: "CRO P"
+icon: release/.icon-ico/icon.ico
 directories:
   output: release
 asar: false
@@ -23,6 +23,9 @@ npmRebuild: true
 win:
   target:
     - nsis
+  arch:
+    - x64
+    - ia32
   signAndEditExecutable: false
 publish:
   provider: github
@@ -32,5 +35,5 @@ publish:
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
-  shortcutName: "مركز الجمجمة"
+  shortcutName: "CRO P"
   runAfterFinish: true

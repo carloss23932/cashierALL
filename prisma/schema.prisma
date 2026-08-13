@@ -93,6 +93,8 @@ model User {
   debtsCreated Debt[]         @relation("DebtCreatedBy")
   debtPayments DebtPayment[]
   activityLogs UserActivityLog[]
+  telegramBotSetting TelegramBotSetting? @relation("LegacyTelegramUserBot")
+  telegramCashierCopies TelegramBotSetting[] @relation("TelegramCashierUser")
 }
 
 model Client {
@@ -172,10 +174,97 @@ model UserActivityLog {
   @@index([userId, createdAt])
 }
 
+model PurchaseInvoice {
+  id          String               @id @default(cuid())
+  invoiceNumber String?
+  date        DateTime?
+  timestamp   DateTime             @default(now())
+  supplierName String?
+  cashier     String?
+  itemsCount  Int                  @default(0)
+  totalAmount Float                @default(0)
+  items       PurchaseInvoiceItem[]
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  @@index([timestamp])
+  @@index([date])
+  @@index([supplierName])
+}
+
+model PurchaseInvoiceItem {
+  id          String          @id @default(cuid())
+  invoiceId   String
+  invoice     PurchaseInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  productId   Int?
+  productName String?
+  quantity    Float           @default(0)
+  cost        Float           @default(0)
+  createdAt   DateTime        @default(now())
+
+  @@index([invoiceId])
+  @@index([productId])
+}
+
+model SupplierPayment {
+  id           String   @id @default(cuid())
+  supplierName String
+  amount       Float
+  note         String?
+  timestamp    DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([supplierName])
+  @@index([timestamp])
+}
+
+// Invoice Change Log - tracks all modifications to invoices
+model InvoiceChangeLog {
+  id              String   @id @default(cuid())
+  invoiceType     String   // "purchase" or "sale"
+  invoiceId       String   // Can be purchase invoice ID or sale ID
+  userId          Int?
+  userName        String?  // Backup of user name at the time of change
+  action          String   // "create", "update", "delete"
+  fieldName       String?  // Which field was modified (for updates)
+  oldValue        String?  // Previous value (JSON serialized if complex)
+  newValue        String?  // New value (JSON serialized if complex)
+  description     String?  // Human-readable description of the change
+  createdAt       DateTime @default(now())
+
+  @@index([invoiceType])
+  @@index([invoiceId])
+  @@index([userId])
+  @@index([createdAt])
+  @@index([invoiceType, invoiceId])
+}
+
 // Simple key/value settings table for application-wide configuration
 model AppSetting {
   id        Int      @id @default(autoincrement())
   key       String   @unique
   value     String?
   updatedAt DateTime @updatedAt
+}
+
+model TelegramBotSetting {
+  id            Int      @id @default(autoincrement())
+  scope         String   @default("cashier_copy")
+  label         String?
+  userId        Int?     @unique
+  botToken      String
+  chatId        String?
+  cashierChatId String?
+  ownerChatId   String?
+  cashierUserId Int?
+  enabled       Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  user          User?    @relation("LegacyTelegramUserBot", fields: [userId], references: [id], onDelete: Cascade)
+  cashierUser   User?    @relation("TelegramCashierUser", fields: [cashierUserId], references: [id], onDelete: SetNull)
+
+  @@index([scope])
+  @@index([cashierUserId])
+  @@index([enabled])
 }

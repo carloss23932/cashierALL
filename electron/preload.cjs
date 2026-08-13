@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld("api", {
   listSales: (opts) => ipcRenderer.invoke('list-sales', opts),
   updateSale: (sale) => ipcRenderer.invoke('update-sale', sale),
   getLastSale: () => ipcRenderer.invoke('get-last-sale'),
+  getSaleById: (saleIdentifier) => ipcRenderer.invoke('get-sale-by-id', saleIdentifier),
   createReturn: (ret) => ipcRenderer.invoke('create-return', ret),
   listReturns: () => ipcRenderer.invoke('list-returns'),
 
@@ -60,9 +61,14 @@ contextBridge.exposeInMainWorld("api", {
   cloudSyncStatus: () => ipcRenderer.invoke('cloud-sync-status'),
   cloudSyncNow: () => ipcRenderer.invoke('cloud-sync-now'),
   cloudSyncFull: () => ipcRenderer.invoke('cloud-sync-full'),
+  getTelegramBotSettings: () => ipcRenderer.invoke('get-telegram-bot-settings'),
+  setTelegramBotSettings: (payload) => ipcRenderer.invoke('set-telegram-bot-settings', payload),
+  testTelegramBot: (payload) => ipcRenderer.invoke('test-telegram-bot', payload),
   // --- App Updates ---
   getUpdateStatus: () => ipcRenderer.invoke('get-update-status'),
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
+  downloadUpdate: () => ipcRenderer.invoke('download-update'),
+  installUpdate: () => ipcRenderer.invoke('install-update'),
   onUpdateStatus: (callback) => {
     const handler = (_event, payload) => callback(payload);
     ipcRenderer.on('update-status', handler);
@@ -70,6 +76,7 @@ contextBridge.exposeInMainWorld("api", {
   },
   // --- Receipt preview / decode ---
   decodeReceipt: (payload) => ipcRenderer.invoke('decode-receipt', payload),
+  exportReportPdf: (payload) => ipcRenderer.invoke('export-report-pdf', payload),
 
   // --- Reports / Misc ---
   listDailyNotes: (payload) => ipcRenderer.invoke('list-daily-notes', payload),
@@ -81,13 +88,20 @@ contextBridge.exposeInMainWorld("api", {
   listPurchaseInvoices: (opts) => ipcRenderer.invoke('list-purchase-invoices', opts),
   updatePurchaseInvoice: (payload) => ipcRenderer.invoke('update-purchase-invoice', payload),
   addSupplierPayment: (data) => ipcRenderer.invoke('add-supplier-payment', data),
+  updateSupplierPayment: (data) => ipcRenderer.invoke('update-supplier-payment', data),
   listSupplierPayments: () => ipcRenderer.invoke('list-supplier-payments'),
   resetSuppliers: () => ipcRenderer.invoke('reset-suppliers'),
+  // --- Invoice Change Logs ---
+  listInvoiceChanges: (opts) => ipcRenderer.invoke('list-invoice-changes', opts),
+  getInvoiceChangesById: (payload) => ipcRenderer.invoke('get-invoice-changes-by-id', payload),
   // --- Archives ---
   listArchives: () => ipcRenderer.invoke('list-archives'),
   readArchive: (payload) => ipcRenderer.invoke('read-archive', payload),
   runArchiveNow: () => ipcRenderer.invoke('run-archive-now'),
   // --- Backups (renderer calls these; handlers may be added in main later) ---
+  backupCreate: (payload) => ipcRenderer.invoke('backup-create', payload),
+  backupList: () => ipcRenderer.invoke('backup-list'),
+  backupRestoreManaged: (payload) => ipcRenderer.invoke('backup-restore-managed', payload),
   backupAll: (payload) => ipcRenderer.invoke('backup-all', payload),
   backupProducts: (payload) => ipcRenderer.invoke('backup-products', payload),
   backupDebts: (payload) => ipcRenderer.invoke('backup-debts', payload),
@@ -95,6 +109,27 @@ contextBridge.exposeInMainWorld("api", {
   backupRestore: (payload) => ipcRenderer.invoke('backup-restore', payload),
   // --- User Activity Logs ---
   listUserActivityLogs: (payload) => ipcRenderer.invoke('list-user-activity-logs', payload),
+  listPricingLogs: (payload) => ipcRenderer.invoke('list-pricing-logs', payload),
+  // --- Center Cashbox ---
+  listCenterCashboxEntries: (payload) => ipcRenderer.invoke('list-center-cashbox-entries', payload),
+  createCenterCashboxEntry: (payload) => ipcRenderer.invoke('create-center-cashbox-entry', payload),
+  updateCenterCashboxEntry: (payload) => ipcRenderer.invoke('update-center-cashbox-entry', payload),
+  deleteCenterCashboxEntry: (payload) => ipcRenderer.invoke('delete-center-cashbox-entry', payload),
+  exportCenterCashboxCsv: (payload) => ipcRenderer.invoke('export-center-cashbox-csv', payload),
+  // --- AI ---
+  aiChat: (payload) => ipcRenderer.invoke('ai-chat', payload),
   // --- System ---
+  zeroNegativeStock: () => ipcRenderer.invoke('zero-negative-stock'),
+  zeroAllStock: () => ipcRenderer.invoke('zero-all-stock'),
+  chooseReceiptBarcodeImage: () => ipcRenderer.invoke('choose-receipt-barcode-image'),
+  runAutoPricing: () => ipcRenderer.invoke('run-auto-pricing'),
+  captureAutoPricingProfiles: () => ipcRenderer.invoke('capture-auto-pricing-profiles'),
   factoryReset: () => ipcRenderer.invoke('factory-reset'),
+  // --- Network Status ---
+  getNetworkStatus: () => ipcRenderer.invoke('get-network-status'),
+  onNetworkStatusChange: (callback) => {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('network-status-changed', handler);
+    return () => ipcRenderer.removeListener('network-status-changed', handler);
+  },
 });

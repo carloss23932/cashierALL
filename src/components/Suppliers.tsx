@@ -17,6 +17,11 @@ const Suppliers = ({ currentUser }: { currentUser?: any }) => {
   const [isAddSupplierOpen, setIsAddSupplierOpen] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentNote, setPaymentNote] = useState("");
+  const [isEditPaymentOpen, setIsEditPaymentOpen] = useState(false);
+  const [editingPayment, setEditingPayment] = useState<any>(null);
+  const [editPaymentAmount, setEditPaymentAmount] = useState("");
+  const [editPaymentNote, setEditPaymentNote] = useState("");
+  const [editPaymentDate, setEditPaymentDate] = useState("");
   const [newSupplierName, setNewSupplierName] = useState("");
   const [newSupplierBalance, setNewSupplierBalance] = useState("");
   const [viewInvoice, setViewInvoice] = useState<any>(null);
@@ -98,6 +103,33 @@ const Suppliers = ({ currentUser }: { currentUser?: any }) => {
     onError: () => toast({ title: "خطأ", description: "فشل تسجيل الدفعة.", variant: "destructive" })
   });
 
+  const updatePaymentMutation = useMutation({
+    mutationFn: (data: any) => window.api.updateSupplierPayment(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["supplierPayments"] });
+      toast({ title: "تم التعديل", description: "تم تعديل الدفعة بنجاح." });
+      setIsEditPaymentOpen(false);
+      setEditingPayment(null);
+    },
+    onError: () => toast({ title: "خطأ", description: "فشل تعديل الدفعة.", variant: "destructive" })
+  });
+
+  const toDateInput = (value?: string) => {
+    if (!value) return new Date().toISOString().split("T")[0];
+    const dt = new Date(value);
+    if (Number.isNaN(dt.getTime())) return new Date().toISOString().split("T")[0];
+    return dt.toISOString().split("T")[0];
+  };
+
+  const openEditPayment = (payment: any) => {
+    if (!payment) return;
+    setEditingPayment(payment);
+    setEditPaymentAmount(String(payment.amount ?? ""));
+    setEditPaymentNote(payment.note || "");
+    setEditPaymentDate(toDateInput(payment.timestamp || payment.date));
+    setIsEditPaymentOpen(true);
+  };
+
   const handleAddPayment = () => {
     if (!selectedSupplier || !paymentAmount) return;
     addPaymentMutation.mutate({
@@ -105,6 +137,16 @@ const Suppliers = ({ currentUser }: { currentUser?: any }) => {
       amount: paymentAmount,
       note: paymentNote,
       date: new Date().toISOString()
+    });
+  };
+
+  const handleUpdatePayment = () => {
+    if (!editingPayment || editPaymentAmount === "") return;
+    updatePaymentMutation.mutate({
+      id: editingPayment.id,
+      amount: editPaymentAmount,
+      note: editPaymentNote,
+      timestamp: editPaymentDate ? new Date(editPaymentDate).toISOString() : editingPayment.timestamp
     });
   };
 
@@ -527,6 +569,49 @@ const Suppliers = ({ currentUser }: { currentUser?: any }) => {
                       </div>
                     </DialogContent>
                   </Dialog>
+                  <Dialog
+                    open={isEditPaymentOpen}
+                    onOpenChange={(open) => {
+                      setIsEditPaymentOpen(open);
+                      if (!open) setEditingPayment(null);
+                    }}
+                  >
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>تعديل دفعة {editingPayment?.supplierName || ""}</DialogTitle>
+                      </DialogHeader>
+                      <div className="space-y-4 py-4">
+                        <div className="space-y-2">
+                          <Label>المبلغ المدفوع</Label>
+                          <Input
+                            type="number"
+                            value={editPaymentAmount}
+                            onChange={e => setEditPaymentAmount(e.target.value)}
+                            placeholder="0.00"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>التاريخ</Label>
+                          <Input
+                            type="date"
+                            value={editPaymentDate}
+                            onChange={e => setEditPaymentDate(e.target.value)}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>ملاحظات</Label>
+                          <Input
+                            value={editPaymentNote}
+                            onChange={e => setEditPaymentNote(e.target.value)}
+                            placeholder="رقم وصل، طريقة الدفع..."
+                          />
+                        </div>
+                        <Button onClick={handleUpdatePayment} className="w-full">
+                          حفظ التعديل
+                        </Button>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
                 </div>
                 
                 <div className="grid grid-cols-3 gap-4 mt-4">
@@ -591,7 +676,21 @@ const Suppliers = ({ currentUser }: { currentUser?: any }) => {
                         <TableCell className="text-sm text-slate-600">
                           {item.type === 'invoice' 
                             ? `رقم: ${item.invoiceNumber} (${item.itemsCount} مواد)` 
-                            : item.note || "بدون ملاحظات"}
+                            : (
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="truncate">{item.note || "بدون ملاحظات"}</span>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openEditPayment(item);
+                                  }}
+                                >
+                                  تعديل
+                                </Button>
+                              </div>
+                            )}
                         </TableCell>
                         <TableCell className="text-center font-bold text-emerald-700">
                           {item.type === 'payment' ? formatCurrency(item.amount) : "-"}

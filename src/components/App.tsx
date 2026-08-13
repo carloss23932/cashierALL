@@ -13,11 +13,26 @@ import Cashiers from "./Cashiers";
 import ChickenLegs from "./ChickenLegs"; 
 import DebtsPage from "./Debts";
 import UserActivityLogPage from "./UserActivityLogPage";
+import PricingLogsPage from "./PricingLogsPage";
+import CenterCashboxPage from "./CenterCashboxPage";
 import SettingsPage from "./SettingsPage";
 import Suppliers from "./Suppliers";
 import ArchivesPage from "./ArchivesPage";
+import InvoiceChangeLogs from "./InvoiceChangeLogs";
+import AIChatPage from "./AIChatPage";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      networkMode: "always",
+      retry: false,
+    },
+    mutations: {
+      networkMode: "always",
+    },
+  },
+});
+const POS_THEMES = ["classic", "focus", "stack"];
 
 function App() {
   const [currentUser, setCurrentUser] = useState(null);
@@ -29,6 +44,10 @@ function App() {
   const [soundEnabled, setSoundEnabled] = useState(() => localStorage.getItem("soundEnabled") !== "false"); // الافتراضي مفعل
   const [allowPriceEdit, setAllowPriceEdit] = useState(() => localStorage.getItem("allowPriceEdit") === "true");
   const [purchaseMode, setPurchaseMode] = useState(() => localStorage.getItem("purchaseMode") || "units");
+  const [posTheme, setPosTheme] = useState(() => {
+    const stored = localStorage.getItem("posTheme") || "classic";
+    return POS_THEMES.includes(stored) ? stored : "classic";
+  });
   const [showLanterns, setShowLanterns] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<any>({ status: "idle", available: false });
 
@@ -102,6 +121,13 @@ function App() {
     window.api.setAppSetting({ key: "purchaseMode", value: mode });
   };
 
+  const handlePosThemeChange = (theme: string) => {
+    const next = POS_THEMES.includes(theme) ? theme : "classic";
+    setPosTheme(next);
+    localStorage.setItem("posTheme", next);
+    window.api.setAppSetting({ key: "posTheme", value: next });
+  };
+
   const handleMoonClick = () => {
     if (!showLanterns) {
       setShowLanterns(true);
@@ -121,6 +147,7 @@ function App() {
         const savedSound = await window.api.getAppSetting("soundEnabled");
         const savedAllowPriceEdit = await window.api.getAppSetting("allowPriceEdit");
         const savedPurchaseMode = await window.api.getAppSetting("purchaseMode");
+        const savedPosTheme = await window.api.getAppSetting("posTheme");
 
         if (savedMode !== null && savedMode !== undefined) {
           const isEnabled = savedMode === "true";
@@ -142,6 +169,13 @@ function App() {
           localStorage.setItem("allowPriceEdit", savedAllowPriceEdit);
         }
         if (savedPurchaseMode) { setPurchaseMode(savedPurchaseMode); localStorage.setItem("purchaseMode", savedPurchaseMode); }
+        if (savedPosTheme && POS_THEMES.includes(savedPosTheme)) {
+          setPosTheme(savedPosTheme);
+          localStorage.setItem("posTheme", savedPosTheme);
+        } else if (savedPosTheme) {
+          setPosTheme("classic");
+          localStorage.setItem("posTheme", "classic");
+        }
       } catch (e) {
         console.error("Failed to load ramadan mode setting", e);
       }
@@ -191,7 +225,9 @@ function App() {
     document.documentElement.classList.remove("font-small", "font-medium", "font-large");
     document.documentElement.classList.add(`font-${fontSize}`);
 
-  }, [isRamadanMode, compactMode, reduceAnimations, fontSize]);
+    document.body.classList.remove("pos-theme-classic", "pos-theme-focus", "pos-theme-stack");
+    document.body.classList.add(`pos-theme-${posTheme}`);
+  }, [isRamadanMode, compactMode, reduceAnimations, fontSize, posTheme]);
 
   if (!currentUser) {
     return (
@@ -270,6 +306,41 @@ function App() {
     html.font-large { font-size: 18px; }
   `;
 
+  const posThemeStyles = `
+    /* POS Themes (scope: .pos-root) */
+    @media (min-width: 1024px) {
+      .pos-theme-focus .pos-root {
+        flex-direction: row !important;
+      }
+      .pos-theme-focus .pos-root > main {
+        order: 1 !important;
+        flex: 1 1 auto !important;
+      }
+      .pos-theme-focus .pos-root > aside {
+        order: 2 !important;
+        width: 260px !important;
+      }
+    }
+
+    .pos-theme-stack .pos-root {
+      flex-direction: column !important;
+    }
+    .pos-theme-stack .pos-root > main {
+      order: 1 !important;
+      flex: 1 1 auto !important;
+      height: auto !important;
+    }
+    .pos-theme-stack .pos-root > aside {
+      order: 2 !important;
+      width: 100% !important;
+      height: auto !important;
+      flex: 0 0 auto !important;
+    }
+    .pos-theme-stack .pos-root > aside .grid {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+  `;
+
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
@@ -278,6 +349,7 @@ function App() {
           <style>{compactStyles}</style>
           <style>{animationStyles}</style>
           <style>{fontStyles}</style>
+          <style>{posThemeStyles}</style>
           {isRamadanMode && (
             <style>{`
               /* الألوان الأساسية: زمردي وذهبي */
@@ -394,7 +466,11 @@ function App() {
                 <Route path="/debts" element={<DebtsPage />} />
                 <Route path="/suppliers" element={<Suppliers currentUser={currentUser} />} />
                 <Route path="/archives" element={<ArchivesPage />} />
+                <Route path="/ai-chat" element={<AIChatPage currentUser={currentUser} />} />
                 <Route path="/activity-log" element={<UserActivityLogPage />} />
+                <Route path="/pricing-logs" element={<PricingLogsPage />} />
+                <Route path="/invoice-logs" element={<InvoiceChangeLogs />} />
+                <Route path="/center-cashbox" element={<CenterCashboxPage currentUser={currentUser} />} />
                 <Route path="/settings" element={
                   <SettingsPage 
                     currentUser={currentUser} 
@@ -402,6 +478,8 @@ function App() {
                     onToggleRamadan={toggleRamadanMode}
                     themeColor={themeColor}
                     onThemeChange={handleThemeChange}
+                    posTheme={posTheme}
+                    onPosThemeChange={handlePosThemeChange}
                     compactMode={compactMode}
                     onCompactModeChange={handleCompactModeChange}
                     reduceAnimations={reduceAnimations}

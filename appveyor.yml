@@ -12,10 +12,12 @@ environment:
 
 install:
   - ps: Install-Product node $env:nodejs_version
-  - ps: choco install python --version=3.11.9 -y
-  - ps: $env:PYTHON = 'C:\Python311\python.exe'
-  - ps: $env:npm_config_python = 'C:\Python311\python.exe'
-  - ps: python --version
+  - ps: |
+      $python = (& py -3.11 -c "import sys; print(sys.executable)").Trim()
+      $env:PYTHON = $python
+      $env:npm_config_python = $python
+      Write-Host "Using Python at $python"
+      & $python --version
   - npm ci
 
 build: off

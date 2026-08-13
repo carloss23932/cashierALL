@@ -23,7 +23,7 @@ install:
 build: off
 
 build_script:
-  - npx electron-builder --win --x64 --ia32
+  - npx electron-builder --win --x64 --ia32 --publish never
 
 artifacts:
   - path: dist_electron\**

@@ -1,4 +1,5 @@
 const path = require("path");
+const fs = require("fs");
 const sqlite = require("sqlite-electron");
 
 const MODEL_META = {
@@ -374,6 +375,11 @@ class LitePrismaLikeClient {
   }
 
   async _init() {
+    fs.mkdirSync(path.dirname(this.dbPath), { recursive: true });
+    if (!fs.existsSync(this.dbPath)) {
+      const fd = fs.openSync(this.dbPath, "a");
+      fs.closeSync(fd);
+    }
     await sqlite.setdbPath(this.dbPath);
     for (const [model, meta] of Object.entries(MODEL_META)) {
       const rows = await sqlite.fetchAll(`PRAGMA table_info(${quoteIdent(meta.table)});`);

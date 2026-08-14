@@ -22,7 +22,7 @@ app.disableHardwareAcceleration();
 
 // Consider the app packaged status as well — packaged builds should not try to load the Vite dev server.
 const isDev = (process.env.NODE_ENV !== "production") && !app.isPackaged;
-const FIXED_USER_DATA_DIR_NAME = "مركز الجمجمة";
+const FIXED_USER_DATA_DIR_NAME = "CRO-P-Data";
 const defaultUserDataPath = app.getPath("userData");
 
 if (!isDev) {
@@ -74,6 +74,16 @@ if (!isDev && !fs.existsSync(dbPath)) {
       } catch (err) {
         console.warn("Could not restore from backup:", err.message);
       }
+    }
+  }
+
+  if (!fs.existsSync(dbPath)) {
+    try {
+      const fd = fs.openSync(dbPath, "a");
+      fs.closeSync(fd);
+      console.log("Created empty production database file:", dbPath);
+    } catch (err) {
+      console.warn("Could not create empty database file:", err.message);
     }
   }
 }

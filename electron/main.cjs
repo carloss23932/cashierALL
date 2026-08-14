@@ -3208,6 +3208,7 @@ async function createWindow() {
     height: 800,
     title: appTitle,
     icon: path.join(__dirname, "icons", "icon.ico"),
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -3215,6 +3216,12 @@ async function createWindow() {
     },
   });
   mainWindow = win;
+  win.once("ready-to-show", () => {
+    if (!win.isDestroyed()) {
+      win.show();
+      win.focus();
+    }
+  });
   win.on("closed", () => {
     if (mainWindow === win) mainWindow = null;
   });
@@ -3290,30 +3297,6 @@ app.whenReady().then(async () => {
   console.log(`Backups directory: ${backupsDir}`);
   let startupDbInitError = null;
 
-  try {
-    await initSyncAgent();
-  } catch (e) {
-    console.error('Failed to init sync agent:', e);
-  }
-
-  try {
-    await initAutoArchive();
-  } catch (e) {
-    console.error('Failed to init auto archive:', e);
-  }
-
-  try {
-    await restartTelegramBots();
-  } catch (e) {
-    console.error('Failed to init Telegram bots:', e);
-  }
-
-  try {
-    await fixDebtReasonEncoding();
-  } catch (e) {
-    console.error('Failed to run debt reason fix:', e);
-  }
-
   // List available backup files to verify full_debts.json presence
   try {
     if (fs.existsSync(backupsDir)) {
@@ -3382,6 +3365,8 @@ app.whenReady().then(async () => {
   }
   // ---------------------------------------------------
 
+  createWindow();
+
   // --- التأكد من وجود حساب المدير عند بدء التشغيل (إصلاح تلقائي) ---
   try {
     const prisma = await getPrisma();
@@ -3398,7 +3383,32 @@ app.whenReady().then(async () => {
   } catch (e) { console.error("Error ensuring admin user:", e); }
 
   initAutoUpdater();
-  createWindow();
+
+  void (async () => {
+    try {
+      await initSyncAgent();
+    } catch (e) {
+      console.error('Failed to init sync agent:', e);
+    }
+
+    try {
+      await initAutoArchive();
+    } catch (e) {
+      console.error('Failed to init auto archive:', e);
+    }
+
+    try {
+      await restartTelegramBots();
+    } catch (e) {
+      console.error('Failed to init Telegram bots:', e);
+    }
+
+    try {
+      await fixDebtReasonEncoding();
+    } catch (e) {
+      console.error('Failed to run debt reason fix:', e);
+    }
+  })();
 
   // Server process is disabled as we use IPC now
   // if (!isDev) {

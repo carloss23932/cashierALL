@@ -40,6 +40,44 @@ const dbPath = isDev
   ? path.join(__dirname, "..", "prisma", "dev.db")
   : path.join(userDataPath, "dev.db");
 
+// Ensure the user data directory exists
+if (!fs.existsSync(userDataPath)) {
+  fs.mkdirSync(userDataPath, { recursive: true });
+  console.log("Created userData directory:", userDataPath);
+}
+
+// If in production and database doesn't exist, try to restore from backups or create empty one
+if (!isDev && !fs.existsSync(dbPath)) {
+  const devDbPath = path.join(__dirname, "..", "prisma", "dev.db");
+  const backupsPath = path.join(__dirname, "..", "backups");
+  
+  if (fs.existsSync(devDbPath)) {
+    // Copy from dev version
+    try {
+      fs.copyFileSync(devDbPath, dbPath);
+      console.log("✅ Copied database from dev version:", dbPath);
+    } catch (err) {
+      console.warn("Could not copy dev database:", err.message);
+    }
+  } else if (fs.existsSync(backupsPath)) {
+    // Try to restore from backups
+    const backupFiles = fs.readdirSync(backupsPath)
+      .filter(f => f.startsWith("backup-") && f.endsWith(".db"))
+      .sort()
+      .reverse();
+    
+    if (backupFiles.length > 0) {
+      const latestBackup = path.join(backupsPath, backupFiles[0]);
+      try {
+        fs.copyFileSync(latestBackup, dbPath);
+        console.log("✅ Restored database from backup:", backupFiles[0]);
+      } catch (err) {
+        console.warn("Could not restore from backup:", err.message);
+      }
+    }
+  }
+}
+
 process.env.DATABASE_URL = `file:${dbPath}`;
 const ALLOW_STARTUP_DB_SOURCE_SWITCH = String(process.env.ALLOW_STARTUP_DB_SOURCE_SWITCH || "false").toLowerCase() === "true";
 
@@ -3088,28 +3126,38 @@ async function getPrisma() {
   if (prismaInstance) return prismaInstance;
   if (!prismaInitPromise) {
     prismaInitPromise = (async () => {
-      const { LitePrismaLikeClient } = require('./sqlite-client.cjs');
-      const client = new LitePrismaLikeClient({
-        datasources: {
-          db: {
-            url: `file:${dbPath}`,
-          },
-        },
-      });
       try {
-        await client.$queryRawUnsafe('PRAGMA journal_mode = WAL;');
-        await client.$queryRawUnsafe('PRAGMA synchronous = NORMAL;');
-        await client.$queryRawUnsafe('PRAGMA busy_timeout = 5000;');
-      } catch (e) {
-        console.error('Failed to set SQLite pragmas:', e);
+        const { LitePrismaLikeClient } = require('./sqlite-client.cjs');
+        const client = new LitePrismaLikeClient({
+          datasources: {
+            db: {
+              url: `file:${dbPath}`,
+            },
+          },
+        });
+        
+        console.log('Database path:', dbPath);
+        console.log('Database exists:', fs.existsSync(dbPath));
+        
+        try {
+          await client.$queryRawUnsafe('PRAGMA journal_mode = WAL;');
+          await client.$queryRawUnsafe('PRAGMA synchronous = NORMAL;');
+          await client.$queryRawUnsafe('PRAGMA busy_timeout = 5000;');
+        } catch (e) {
+          console.error('Failed to set SQLite pragmas:', e);
+        }
+        await ensureCorePrismaSchema(client);
+        await ensureLegacySaleSchema(client);
+        await ensurePurchaseSupplierSchema(client);
+        await ensureInvoiceChangeLogSchema(client);
+        await migrateLegacyPurchaseSupplierJson(client);
+        prismaInstance = client;
+        console.log('✅ Database connected successfully');
+        return client;
+      } catch (error) {
+        console.error('❌ Failed to initialize database:', error.message);
+        throw new Error(`Database initialization failed: ${error.message}`);
       }
-      await ensureCorePrismaSchema(client);
-      await ensureLegacySaleSchema(client);
-      await ensurePurchaseSupplierSchema(client);
-      await ensureInvoiceChangeLogSchema(client);
-      await migrateLegacyPurchaseSupplierJson(client);
-      prismaInstance = client;
-      return client;
     })();
   }
   return prismaInitPromise;

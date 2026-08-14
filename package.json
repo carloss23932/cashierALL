@@ -14,9 +14,10 @@
     "dev:electron": "npx wait-on http://localhost:8080 && electron .",
     "dev:desktop": "npx concurrently -k \"npm:dev\" \"npm:dev:electron\"",
     "print:test": "node scripts/send-raw-print.cjs",
-    "build:desktop": "npm run build && electron-builder",
-    "publish:desktop": "npm run build && electron-builder --publish always",
-    "dist:win": "electron-builder --win --ia32",
+    "build:desktop": "npm run repair-db && npm run build && electron-builder",
+    "publish:desktop": "npm run repair-db && npm run build && electron-builder --publish always",
+    "dist:win": "npm run repair-db && electron-builder --win --ia32",
+    "repair-db": "node -e \"const fs=require('fs'),path=require('path');const backupsDir=path.join(__dirname,'backups');const dbPath=path.join(__dirname,'prisma','dev.db');if(!fs.existsSync(dbPath)&&fs.existsSync(backupsDir)){const files=fs.readdirSync(backupsDir).filter(f=>f.startsWith('backup-')&&f.endsWith('.db')).sort().reverse();if(files.length>0){fs.copyFileSync(path.join(backupsDir,files[0]),dbPath);console.log('✅ Database restored from backup');}}\"",
     "postinstall": "electron-builder install-app-deps",
     "check-db": "node -e \"console.log('DB exists:', require('fs').existsSync('prisma/dev.db'))\"",
     "reinstall": "node clean.js && npm install"
@@ -37,10 +38,12 @@
       "dist/**/*",
       "electron/**/*",
       "package.json",
-      "prisma/dev.db"
+      "prisma/dev.db",
+      "backups/**/*"
     ],
     "extraResources": [
-      "prisma/dev.db"
+      "prisma/dev.db",
+      "backups"
     ],
     "win": {
       "target": [

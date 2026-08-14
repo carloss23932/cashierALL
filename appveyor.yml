@@ -23,7 +23,6 @@ install:
 build: off
 
 build_script:
-  - npm run prisma:generate
   - npm run build
   - npx electron-builder --win --ia32 --publish never
 

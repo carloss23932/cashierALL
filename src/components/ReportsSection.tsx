@@ -296,7 +296,7 @@ const ReportsSection = ({ currentUser }: { currentUser?: any }) => {
         ...row,
         total: Number(row.cashReceived || 0) + Number(row.debtPayments || 0) + Number(row.dailyNotes || 0) + Number(row.cashboxEffect || 0) - Number(row.returns || 0),
       }))
-      .sort((a: any, b: any) => a.date.localeCompare(b.date));
+      .sort((a: any, b: any) => String(a?.date || "").localeCompare(String(b?.date || ""), "ar"));
   }, [filteredSales, paidDebtsByDate, returnsByDate, dailyNotesByDate, cashboxByDate, reportTrigger]);
 
   const mastercardReport = useMemo(() => {
@@ -370,7 +370,7 @@ const ReportsSection = ({ currentUser }: { currentUser?: any }) => {
       row.total += Number(invoice.totalAmount || 0);
       map.set(dateKey, row);
     }
-    return Array.from(map.values()).sort((a: any, b: any) => a.date.localeCompare(b.date));
+    return Array.from(map.values()).sort((a: any, b: any) => String(a?.date || "").localeCompare(String(b?.date || ""), "ar"));
   }, [filteredPurchaseInvoices, reportTrigger]);
 
   const purchasedItems = useMemo(() => {
@@ -484,7 +484,7 @@ const ReportsSection = ({ currentUser }: { currentUser?: any }) => {
     }
     return Array.from(map.values())
       .map((r) => ({ ...r, profit: r.revenue - r.cost }))
-      .sort((a, b) => a.date.localeCompare(b.date));
+      .sort((a, b) => String(a?.date || "").localeCompare(String(b?.date || ""), "ar"));
   }, [filteredSales, returnsData, productCostMap, dateFrom, dateTo, reportTrigger]);
 
   const topDebtors = useMemo(() => {

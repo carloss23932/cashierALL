@@ -244,6 +244,37 @@ function isPlainObject(value) {
   return !!value && typeof value === "object" && !Array.isArray(value) && !(value instanceof Date);
 }
 
+function hasOwn(obj, key) {
+  return Object.prototype.hasOwnProperty.call(obj || {}, key);
+}
+
+function normalizeScalarValue(value, model, field) {
+  if (value == null) return value;
+  if (isPlainObject(value)) {
+    if (hasOwn(value, "set")) return fromJsValue(model, field, value.set);
+    if (hasOwn(value, "increment")) return Number(value.increment || 0);
+    if (hasOwn(value, "decrement")) return Number(value.decrement || 0);
+  }
+  return fromJsValue(model, field, value);
+}
+
+function buildUpdateAssignment(field, rawValue, model, params) {
+  if (!isPlainObject(rawValue)) return null;
+  if (hasOwn(rawValue, "increment")) {
+    params.push(Number(rawValue.increment || 0));
+    return `${quoteIdent(field)} = COALESCE(${quoteIdent(field)}, 0) + ?`;
+  }
+  if (hasOwn(rawValue, "decrement")) {
+    params.push(Number(rawValue.decrement || 0));
+    return `${quoteIdent(field)} = COALESCE(${quoteIdent(field)}, 0) - ?`;
+  }
+  if (hasOwn(rawValue, "set")) {
+    params.push(normalizeScalarValue(rawValue.set, model, field));
+    return `${quoteIdent(field)} = ?`;
+  }
+  return null;
+}
+
 function buildWhere(where, params) {
   if (!where || Object.keys(where).length === 0) return "";
   const clauses = [];
@@ -387,6 +418,67 @@ class LitePrismaLikeClient {
     }
   }
 
+  async refreshMetadata(models = Object.keys(MODEL_META)) {
+    await this._ensureReady();
+    for (const model of models) {
+      const meta = MODEL_META[model];
+      if (!meta) continue;
+      const rows = await sqlite.fetchAll(`PRAGMA table_info(${quoteIdent(meta.table)});`);
+      this._columns.set(model, rows.map((row) => row.name));
+    }
+  }
+
+  async _ensureColumns(model) {
+    await this._ensureReady();
+    const cached = this._columns.get(model);
+    if (Array.isArray(cached) && cached.length) return cached;
+    const meta = MODEL_META[model];
+    if (!meta) return [];
+    const rows = await sqlite.fetchAll(`PRAGMA table_info(${quoteIdent(meta.table)});`);
+    const cols = rows.map((row) => String(row?.name || "").trim()).filter(Boolean);
+    this._columns.set(model, cols);
+    return cols;
+  }
+
+  _relationOps(model, data) {
+    const relationDefs = RELATIONS[model] || {};
+    const ops = {};
+    for (const [key, value] of Object.entries(data || {})) {
+      if (!relationDefs[key]) continue;
+      if (value && typeof value === "object") ops[key] = value;
+    }
+    return ops;
+  }
+
+  async _applyNestedCreate(model, parentRow, relationOps) {
+    const relationDefs = RELATIONS[model] || {};
+    const pk = this._primaryKey(model);
+    const parentId = parentRow?.[pk];
+    if (parentId == null) return;
+
+    for (const [relationName, op] of Object.entries(relationOps || {})) {
+      const relation = relationDefs[relationName];
+      if (!relation || relation.kind !== "many") continue;
+
+      if (op?.deleteMany) {
+        await this._deleteMany(relation.model, {
+          where: { [relation.foreignKey]: parentId }
+        });
+      }
+
+      const createItems = op?.create == null ? [] : (Array.isArray(op.create) ? op.create : [op.create]);
+      for (const child of createItems) {
+        if (!child || typeof child !== "object") continue;
+        await this._create(relation.model, {
+          data: {
+            ...child,
+            [relation.foreignKey]: parentId
+          }
+        });
+      }
+    }
+  }
+
   async _ensureReady() {
     await this._ready;
   }
@@ -416,7 +508,8 @@ class LitePrismaLikeClient {
     const out = {};
     for (const [key, value] of Object.entries(data || {})) {
       if (!cols.has(key)) continue;
-      out[key] = fromJsValue(model, key, value);
+      if (RELATIONS[model]?.[key]) continue;
+      out[key] = normalizeScalarValue(value, model, key);
     }
     return out;
   }
@@ -579,6 +672,7 @@ class LitePrismaLikeClient {
 
   async _findMany(model, args = {}) {
     await this._ensureReady();
+    await this._ensureColumns(model);
     const meta = MODEL_META[model];
     const cols = this._getColumns(model);
     const select = splitSelect(args.select);
@@ -599,6 +693,7 @@ class LitePrismaLikeClient {
 
   async _count(model, args = {}) {
     await this._ensureReady();
+    await this._ensureColumns(model);
     const meta = MODEL_META[model];
     const params = [];
     const whereSql = buildWhere(args.where, params);
@@ -607,7 +702,10 @@ class LitePrismaLikeClient {
   }
 
   async _create(model, args = {}) {
+    await this._ensureReady();
+    await this._ensureColumns(model);
     const meta = MODEL_META[model];
+    const relationOps = this._relationOps(model, args.data || {});
     const data = this._coerceData(model, args.data || {});
     const cols = Object.keys(data);
     if (!cols.length) {
@@ -625,24 +723,50 @@ class LitePrismaLikeClient {
       const last = await this._rawOne("SELECT last_insert_rowid() AS id");
       created = await this._findOne(model, { where: { [pk]: last?.id }, include: args.include, select: args.select });
     }
+    if (created && Object.keys(relationOps).length) {
+      await this._applyNestedCreate(model, created, relationOps);
+      created = await this._findOne(model, { where: { [pk]: created[pk] }, include: args.include, select: args.select });
+    }
     return created;
   }
 
   async _update(model, args = {}) {
+    await this._ensureReady();
+    await this._ensureColumns(model);
     const meta = MODEL_META[model];
     const pk = this._primaryKey(model);
     const where = args.where || {};
     const key = Object.keys(where)[0] || pk;
     const value = where[key];
-    const data = this._coerceData(model, args.data || {});
-    const cols = Object.keys(data);
-    if (!cols.length) return this._findOne(model, { where, include: args.include, select: args.select });
-    const sql = `UPDATE ${quoteIdent(meta.table)} SET ${cols.map((col) => `${quoteIdent(col)} = ?`).join(", ")} WHERE ${quoteIdent(key)} = ?`;
-    await this._rawExec(sql, [...cols.map((col) => data[col]), normalizeDate(value)]);
+    const relationOps = this._relationOps(model, args.data || {});
+    const cols = this._getColumns(model);
+    const params = [];
+    const setParts = [];
+    for (const [field, rawValue] of Object.entries(args.data || {})) {
+      if (RELATIONS[model]?.[field]) continue;
+      if (!cols.includes(field)) continue;
+      const assignment = buildUpdateAssignment(field, rawValue, model, params);
+      if (assignment) {
+        setParts.push(assignment);
+        continue;
+      }
+      setParts.push(`${quoteIdent(field)} = ?`);
+      params.push(normalizeScalarValue(rawValue, model, field));
+    }
+    if (!setParts.length && !Object.keys(relationOps).length) return this._findOne(model, { where, include: args.include, select: args.select });
+    if (setParts.length) {
+      const sql = `UPDATE ${quoteIdent(meta.table)} SET ${setParts.join(", ")} WHERE ${quoteIdent(key)} = ?`;
+      await this._rawExec(sql, [...params, normalizeDate(value)]);
+    }
+    if (Object.keys(relationOps).length) {
+      await this._applyNestedCreate(model, { [pk]: value }, relationOps);
+    }
     return this._findOne(model, { where, include: args.include, select: args.select });
   }
 
   async _delete(model, args = {}) {
+    await this._ensureReady();
+    await this._ensureColumns(model);
     const meta = MODEL_META[model];
     const where = args.where || {};
     const key = Object.keys(where)[0];
@@ -654,6 +778,8 @@ class LitePrismaLikeClient {
   }
 
   async _deleteMany(model, args = {}) {
+    await this._ensureReady();
+    await this._ensureColumns(model);
     const meta = MODEL_META[model];
     const params = [];
     const whereSql = buildWhere(args.where, params);
@@ -665,17 +791,31 @@ class LitePrismaLikeClient {
   }
 
   async _updateMany(model, args = {}) {
+    await this._ensureReady();
+    await this._ensureColumns(model);
     const meta = MODEL_META[model];
-    const data = this._coerceData(model, args.data || {});
-    const cols = Object.keys(data);
-    if (!cols.length) return { count: 0 };
     const params = [];
     const whereSql = buildWhere(args.where, params);
     const rows = await this._rawAll(`SELECT ${quoteIdent(this._primaryKey(model))} FROM ${quoteIdent(meta.table)} ${whereSql}`, params);
     if (!rows.length) return { count: 0 };
     const ids = rows.map((row) => row[this._primaryKey(model)]);
-    const sql = `UPDATE ${quoteIdent(meta.table)} SET ${cols.map((col) => `${quoteIdent(col)} = ?`).join(", ")} WHERE ${quoteIdent(this._primaryKey(model))} IN (${ids.map(() => "?").join(", ")})`;
-    await this._rawExec(sql, [...cols.map((col) => data[col]), ...ids]);
+    const cols = this._getColumns(model);
+    const setParts = [];
+    const updateParams = [];
+    for (const [field, rawValue] of Object.entries(args.data || {})) {
+      if (RELATIONS[model]?.[field]) continue;
+      if (!cols.includes(field)) continue;
+      const assignment = buildUpdateAssignment(field, rawValue, model, updateParams);
+      if (assignment) {
+        setParts.push(assignment);
+        continue;
+      }
+      setParts.push(`${quoteIdent(field)} = ?`);
+      updateParams.push(normalizeScalarValue(rawValue, model, field));
+    }
+    if (!setParts.length) return { count: 0 };
+    const sql = `UPDATE ${quoteIdent(meta.table)} SET ${setParts.join(", ")} WHERE ${quoteIdent(this._primaryKey(model))} IN (${ids.map(() => "?").join(", ")})`;
+    await this._rawExec(sql, [...updateParams, ...ids]);
     return { count: ids.length };
   }
 

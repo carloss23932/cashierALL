@@ -3161,6 +3161,7 @@ async function getPrisma() {
         await ensurePurchaseSupplierSchema(client);
         await ensureInvoiceChangeLogSchema(client);
         await migrateLegacyPurchaseSupplierJson(client);
+        await client.refreshMetadata?.();
         prismaInstance = client;
         console.log('✅ Database connected successfully');
         return client;
@@ -4952,8 +4953,20 @@ ipcMain.handle('factory-reset', async () => {
 // --- App settings (key/value) stored in the database ---
 ipcMain.handle('get-app-setting', async (event, key) => {
   const prisma = await getPrisma();
+  try {
     const row = await prisma.appSetting.findUnique({ where: { key } });
     return row?.value ?? null;
+  } catch (err) {
+    console.warn(`get-app-setting retry for ${key}:`, err?.message || err);
+    try {
+      await prisma.refreshMetadata?.(["appSetting"]);
+      const row = await prisma.appSetting.findUnique({ where: { key } });
+      return row?.value ?? null;
+    } catch (retryErr) {
+      console.error(`get-app-setting failed for ${key}:`, retryErr);
+      return null;
+    }
+  }
 });
 
 // --- App Updates ---
@@ -5738,12 +5751,28 @@ ipcMain.handle('import-legacy-dbf', async () => {
 ipcMain.handle('list-purchase-invoices', async (event, { limit } = {}) => {
   const prisma = await getPrisma();
   const take = Number(limit);
-  const invoices = await prisma.purchaseInvoice.findMany({
-    include: { items: true },
-    orderBy: { timestamp: 'desc' },
-    ...(Number.isFinite(take) && take > 0 ? { take: Math.floor(take) } : {})
-  });
-  return invoices.map(mapPurchaseInvoiceRecord).filter(Boolean);
+  try {
+    const invoices = await prisma.purchaseInvoice.findMany({
+      include: { items: true },
+      orderBy: { timestamp: 'desc' },
+      ...(Number.isFinite(take) && take > 0 ? { take: Math.floor(take) } : {})
+    });
+    return invoices.map(mapPurchaseInvoiceRecord).filter(Boolean);
+  } catch (err) {
+    console.warn("list-purchase-invoices retry:", err?.message || err);
+    try {
+      await prisma.refreshMetadata?.(["purchaseInvoice", "purchaseInvoiceItem"]);
+      const invoices = await prisma.purchaseInvoice.findMany({
+        include: { items: true },
+        orderBy: { timestamp: 'desc' },
+        ...(Number.isFinite(take) && take > 0 ? { take: Math.floor(take) } : {})
+      });
+      return invoices.map(mapPurchaseInvoiceRecord).filter(Boolean);
+    } catch (retryErr) {
+      console.error("list-purchase-invoices failed:", retryErr);
+      return [];
+    }
+  }
 });
 
 ipcMain.handle('process-purchase-invoice', async (event, data) => {

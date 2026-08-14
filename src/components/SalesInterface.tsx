@@ -278,7 +278,9 @@ const SalesInterface = ({ currentUser, soundEnabled = true, allowPriceEdit = fal
   });
 
   const productsWithoutBarcode = useMemo(
-    () => products.filter((p) => !p.barcode).sort((a, b) => a.name.localeCompare(b.name)),
+    () => products
+      .filter((p) => !p.barcode)
+      .sort((a, b) => String(a?.name || "").localeCompare(String(b?.name || ""), "ar")),
     [products]
   );
 

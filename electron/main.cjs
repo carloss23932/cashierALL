@@ -1486,12 +1486,14 @@ async function runAutoArchive(force = false) {
       fs.writeFileSync(path.join(archiveDir, fileName), JSON.stringify(archivePayload, null, 2), 'utf8');
 
       const returnIds = returns.map(r => r.id);
-      await prisma.$transaction([
-        returnIds.length ? prisma.returnItem.deleteMany({ where: { returnId: { in: returnIds } } }) : prisma.returnItem.deleteMany({ where: { id: -1 } }),
-        returnIds.length ? prisma.return.deleteMany({ where: { id: { in: returnIds } } }) : prisma.return.deleteMany({ where: { id: -1 } }),
-        prisma.saleItem.deleteMany({ where: { saleId: { in: saleIds } } }),
-        prisma.sale.deleteMany({ where: { id: { in: saleIds } } })
-      ]);
+      await prisma.$transaction(async (tx) => {
+        if (returnIds.length) {
+          await tx.returnItem.deleteMany({ where: { returnId: { in: returnIds } } });
+          await tx.return.deleteMany({ where: { id: { in: returnIds } } });
+        }
+        await tx.saleItem.deleteMany({ where: { saleId: { in: saleIds } } });
+        await tx.sale.deleteMany({ where: { id: { in: saleIds } } });
+      });
     }
 
     // Purchase invoices are intentionally excluded from auto-archive
@@ -3086,8 +3088,8 @@ async function getPrisma() {
   if (prismaInstance) return prismaInstance;
   if (!prismaInitPromise) {
     prismaInitPromise = (async () => {
-      const { PrismaClient } = await import('@prisma/client');
-      const client = new PrismaClient({
+      const { LitePrismaLikeClient } = require('./sqlite-client.cjs');
+      const client = new LitePrismaLikeClient({
         datasources: {
           db: {
             url: `file:${dbPath}`,
@@ -3101,20 +3103,6 @@ async function getPrisma() {
       } catch (e) {
         console.error('Failed to set SQLite pragmas:', e);
       }
-      client.$use(async (params, next) => {
-        let attempt = 0;
-        while (true) {
-          try {
-            return await next(params);
-          } catch (err) {
-            if (!isSqliteBusy(err) || attempt >= SQLITE_BUSY_MAX_RETRIES) {
-              throw err;
-            }
-            attempt += 1;
-            await sleep(SQLITE_BUSY_RETRY_DELAY_MS * attempt);
-          }
-        }
-      });
       await ensureCorePrismaSchema(client);
       await ensureLegacySaleSchema(client);
       await ensurePurchaseSupplierSchema(client);
@@ -4855,34 +4843,31 @@ ipcMain.handle('factory-reset', async () => {
     console.log('Factory reset requested. Clearing data...');
 
     // استخدام Transaction لضمان حذف البيانات بالترتيب الصحيح (لتجنب أخطاء العلاقات)
-    await prisma.$transaction([
-      // 1. حذف الجداول الفرعية (التي تعتمد على غيرها)
-      prisma.saleItem.deleteMany(),
-      prisma.returnItem.deleteMany(),
-      prisma.debtPayment.deleteMany(),
-      prisma.chickenLegLog.deleteMany(),
-      prisma.userActivityLog.deleteMany(),
-      
-      // 2. حذف الجداول الرئيسية
-      prisma.sale.deleteMany(),
-      prisma.return.deleteMany(),
-      prisma.debt.deleteMany(),
-      prisma.dailyNote.deleteMany(),
-      prisma.chickenLegDay.deleteMany(),
-      prisma.appSetting.deleteMany(), // حذف الإعدادات (اسم المركز، إلخ)
-      
-      // 3. حذف التعريفات (المنتجات، الأصناف، العملاء)
-      prisma.product.deleteMany(),
-      prisma.category.deleteMany(),
-      prisma.client.deleteMany(),
-      
-      // 4. حذف المستخدمين مع استثناء المدير "admin"
-      prisma.user.deleteMany({
+    // Use a single callback transaction for SQLite compatibility.
+    await prisma.$transaction(async (tx) => {
+      await tx.saleItem.deleteMany();
+      await tx.returnItem.deleteMany();
+      await tx.debtPayment.deleteMany();
+      await tx.chickenLegLog.deleteMany();
+      await tx.userActivityLog.deleteMany();
+
+      await tx.sale.deleteMany();
+      await tx.return.deleteMany();
+      await tx.debt.deleteMany();
+      await tx.dailyNote.deleteMany();
+      await tx.chickenLegDay.deleteMany();
+      await tx.appSetting.deleteMany();
+
+      await tx.product.deleteMany();
+      await tx.category.deleteMany();
+      await tx.client.deleteMany();
+
+      await tx.user.deleteMany({
         where: {
           username: { not: 'admin' }
         }
-      })
-    ]);
+      });
+    });
 
     // التأكد من وجود حساب المدير، وإذا لم يكن موجوداً (تم حذفه سابقاً) نقوم بإنشائه
     const adminExists = await prisma.user.findUnique({ where: { username: 'admin' } });
@@ -5413,8 +5398,8 @@ async function restoreDebtsFromPayload(payload) {
 }
 
 async function restoreDatabaseFromPath(chosenPath) {
-  const { PrismaClient } = await import('@prisma/client');
-  const backupPrisma = new PrismaClient({
+  const { LitePrismaLikeClient } = require('./sqlite-client.cjs');
+  const backupPrisma = new LitePrismaLikeClient({
     datasources: {
       db: {
         url: `file:${chosenPath}`
@@ -6207,11 +6192,11 @@ ipcMain.handle('reset-suppliers', async () => {
   const paymentsPath = path.join(logDir, 'supplier-payments.json');
   const invoicesPath = path.join(logDir, 'purchase-invoices.json');
   try {
-    await prisma.$transaction([
-      prisma.supplierPayment.deleteMany({}),
-      prisma.purchaseInvoiceItem.deleteMany({}),
-      prisma.purchaseInvoice.deleteMany({})
-    ]);
+    await prisma.$transaction(async (tx) => {
+      await tx.supplierPayment.deleteMany({});
+      await tx.purchaseInvoiceItem.deleteMany({});
+      await tx.purchaseInvoice.deleteMany({});
+    });
     // Keep legacy files empty to prevent re-import after reset.
     fs.writeFileSync(paymentsPath, '[]', 'utf8');
     fs.writeFileSync(invoicesPath, '[]', 'utf8');
